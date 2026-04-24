@@ -788,6 +788,19 @@ async function gradeSuggestionsForFinalResults(room: RoomRecord): Promise<Map<st
   }
 }
 
+function updateRoundResultGrade(room: RoomRecord, team: TeamRecord, result: RoundHistoryEntry["results"][number], grade: Grade): void {
+  const previousScoreDelta = result.scoreDelta;
+  const previousBonusDelta = result.bonusDelta;
+  const nextScoreDelta = grade === "correct" ? result.wager ?? 0 : 0;
+  const nextBonusDelta = grade === "correct" ? room.settings.pointsPerCorrect : 0;
+
+  result.grade = grade;
+  result.scoreDelta = nextScoreDelta;
+  result.bonusDelta = nextBonusDelta;
+  team.correctWagerTotal += nextScoreDelta - previousScoreDelta;
+  team.answerPoints += nextBonusDelta - previousBonusDelta;
+}
+
 function clearRoundTimer(room: RoomRecord): void {
   if (room.roundTimer) {
     clearTimeout(room.roundTimer);
@@ -1418,9 +1431,91 @@ io.on("connection", (socket) => {
         return;
       }
 
+      if (teamResult.protest?.status && teamResult.protest.status !== "pending") {
+        fail(socket, ack, "This protest has already been resolved.");
+        return;
+      }
+
       teamResult.protest = {
         text,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        status: "pending"
+      };
+
+      touch(room);
+      ok(ack, {});
+      broadcastState(room);
+    }
+  );
+
+  socket.on(
+    "protest:resolve",
+    (
+      payload: {
+        code?: unknown;
+        hostToken?: unknown;
+        round?: unknown;
+        teamId?: unknown;
+        status?: unknown;
+        response?: unknown;
+      },
+      ack?: AckCallback
+    ) => {
+      const room = requireHost(socket, ack, payload);
+      if (!room) {
+        return;
+      }
+
+      if (room.phase !== "between_rounds" && room.phase !== "finished") {
+        fail(socket, ack, "Protests can be resolved after grades are finalized.");
+        return;
+      }
+
+      const round = Number(payload.round);
+      if (!Number.isInteger(round)) {
+        fail(socket, ack, "Round is required.");
+        return;
+      }
+
+      const status = payload.status;
+      if (status !== "accepted" && status !== "rejected") {
+        fail(socket, ack, "Choose whether to accept or reject the protest.");
+        return;
+      }
+
+      const response = String(payload.response ?? "").trim();
+      if (response.length > 500) {
+        fail(socket, ack, "Host response must be 500 characters or fewer.");
+        return;
+      }
+
+      const historyEntry = room.history.find((entry) => entry.round === round);
+      const teamResult = historyEntry?.results.find((entry) => entry.teamId === payload.teamId);
+      if (!historyEntry || !teamResult?.protest) {
+        fail(socket, ack, "Protest not found.");
+        return;
+      }
+
+      if (teamResult.protest.status && teamResult.protest.status !== "pending") {
+        fail(socket, ack, "This protest has already been resolved.");
+        return;
+      }
+
+      const team = room.teams.find((candidate) => candidate.id === teamResult.teamId);
+      if (!team) {
+        fail(socket, ack, "Team not found.");
+        return;
+      }
+
+      if (status === "accepted") {
+        updateRoundResultGrade(room, team, teamResult, "correct");
+      }
+
+      teamResult.protest = {
+        ...teamResult.protest,
+        status,
+        response: response || undefined,
+        resolvedAt: Date.now()
       };
 
       touch(room);

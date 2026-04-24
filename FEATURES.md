@@ -93,7 +93,15 @@ Status: implemented on the final standings screen.
 
 ## Host Controls
 
-### Manual Score Adjustment
+### Protest Grading
+
+After teams submit protests, let the host accept or reject each protest from round history.
+
+Accepting a protest marks that round result correct and updates the team's score/bonus totals immediately. Rejecting leaves the grade as-is. Hosts can add a short response that the team sees.
+
+Status: implemented after grades are finalized.
+
+### Post-Round Point Change
 
 Allow the host to add or subtract score/bonus points with a short note.
 

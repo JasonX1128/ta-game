@@ -28,6 +28,7 @@ import type {
   GameSettings,
   Grade,
   GradeSuggestion,
+  ProtestStatus,
   PublicRoomState,
   PublicTeam,
   Question,
@@ -303,7 +304,9 @@ function buildResultsCsv(room: PublicRoomState): string {
     `R${index + 1} Grade`,
     `R${index + 1} Answer`,
     `R${index + 1} Feedback`,
-    `R${index + 1} Protest`
+    `R${index + 1} Protest`,
+    `R${index + 1} Protest Status`,
+    `R${index + 1} Host Response`
   ]).flat();
   const headers = [
     "Team",
@@ -352,7 +355,9 @@ function buildResultsCsv(room: PublicRoomState): string {
         result?.grade ?? "",
         result?.answer ?? "",
         result?.aiFeedback ?? "",
-        result?.protest?.text ?? ""
+        result?.protest?.text ?? "",
+        result?.protest?.status ?? "",
+        result?.protest?.response ?? ""
       ];
     }).flat();
 
@@ -1410,7 +1415,7 @@ function HostBetweenRounds({
         </button>
         {status ? <div className="status-line">{status}</div> : null}
       </div>
-      <RoundHistoryPanel room={room} />
+      <RoundHistoryPanel room={room} request={request} hostPayload={hostPayload} />
       <ManualAdjustmentPanel room={room} request={request} hostPayload={hostPayload} />
     </div>
   );
@@ -1456,7 +1461,7 @@ function HostFinished({
         </div>
         {status ? <div className="status-line">{status}</div> : null}
       </div>
-      <RoundHistoryPanel room={room} />
+      <RoundHistoryPanel room={room} request={request} hostPayload={hostPayload} />
       <ManualAdjustmentPanel room={room} request={request} hostPayload={hostPayload} />
     </div>
   );
@@ -1533,7 +1538,7 @@ function ManualAdjustmentPanel({
     <form className="flow-panel" onSubmit={submitAdjustment}>
       <div className="panel-title">
         <SettingsIcon size={20} />
-        Manual Adjustment
+        Post-Round Point Change
       </div>
       <div className="settings-grid">
         <label>
@@ -1568,7 +1573,21 @@ function ManualAdjustmentPanel({
   );
 }
 
-function RoundHistoryPanel({ room }: { room: PublicRoomState }) {
+function protestStatusLabel(status?: ProtestStatus): string {
+  if (status === "accepted") return "Accepted";
+  if (status === "rejected") return "Rejected";
+  return "Pending";
+}
+
+function RoundHistoryPanel({
+  room,
+  request,
+  hostPayload
+}: {
+  room: PublicRoomState;
+  request?: RequestFn;
+  hostPayload?: { code: string; hostToken: string };
+}) {
   if (room.history.length === 0) {
     return null;
   }
@@ -1609,9 +1628,18 @@ function RoundHistoryPanel({ room }: { room: PublicRoomState }) {
                   ) : null}
                   {result.protest ? (
                     <div className="protest-note">
-                      <strong>Protest</strong>
+                      <strong>Protest · {protestStatusLabel(result.protest.status)}</strong>
                       <span>{result.protest.text}</span>
+                      {result.protest.response ? <span>Host response: {result.protest.response}</span> : null}
                     </div>
+                  ) : null}
+                  {room.role === "host" && request && hostPayload && result.protest ? (
+                    <HostProtestControls
+                      request={request}
+                      hostPayload={hostPayload}
+                      result={result}
+                      round={entry.round}
+                    />
                   ) : null}
                 </div>
               ))}
@@ -1620,6 +1648,68 @@ function RoundHistoryPanel({ room }: { room: PublicRoomState }) {
         ))}
       </div>
     </section>
+  );
+}
+
+function HostProtestControls({
+  request,
+  hostPayload,
+  result,
+  round
+}: {
+  request: RequestFn;
+  hostPayload: { code: string; hostToken: string };
+  result: RoundHistoryEntry["results"][number];
+  round: number;
+}) {
+  const [response, setResponse] = useState(result.protest?.response ?? "");
+  const [status, setStatus] = useState("");
+  const protestStatus = result.protest?.status ?? "pending";
+
+  useEffect(() => {
+    setResponse(result.protest?.response ?? "");
+    setStatus("");
+  }, [result.protest?.response, result.protest?.status]);
+
+  async function resolve(status: "accepted" | "rejected"): Promise<void> {
+    const resolution = await request("protest:resolve", {
+      ...hostPayload,
+      round,
+      teamId: result.teamId,
+      status,
+      response
+    });
+
+    setStatus(resolution.ok ? "Protest resolved." : resolution.message);
+  }
+
+  if (protestStatus !== "pending") {
+    return null;
+  }
+
+  return (
+    <div className="protest-controls">
+      <label>
+        Host response
+        <textarea
+          value={response}
+          maxLength={500}
+          onChange={(event) => setResponse(event.target.value)}
+          placeholder="Optional note for the team."
+        />
+      </label>
+      <div className="action-row">
+        <button className="secondary" type="button" onClick={() => resolve("rejected")}>
+          <X size={18} />
+          Reject
+        </button>
+        <button className="primary" type="button" onClick={() => resolve("accepted")}>
+          <Check size={18} />
+          Accept
+        </button>
+      </div>
+      {status ? <div className="status-line">{status}</div> : null}
+    </div>
   );
 }
 
@@ -1713,6 +1803,8 @@ function TeamFinalizedGrade({
     setStatus(response.ok ? "Protest sent." : response.message);
   }
 
+  const protestStatus = result.protest?.status ?? "pending";
+
   return (
     <section className="flow-panel">
       <QuestionCard question={historyEntry.question} round={historyEntry.round} showAnswer />
@@ -1731,21 +1823,30 @@ function TeamFinalizedGrade({
           <span>{result.aiFeedback}</span>
         </div>
       ) : null}
-      <form className="protest-form" onSubmit={submitProtest}>
-        <label>
-          Protest
-          <textarea
-            value={protestText}
-            onChange={(event) => setProtestText(event.target.value)}
-            maxLength={1000}
-            placeholder="Explain what you want the host to reconsider."
-          />
-        </label>
-        <button className="secondary submit-row" disabled={!protestText.trim()}>
-          <Send size={18} />
-          {result.protest ? "Update Protest" : "Submit Protest"}
-        </button>
-      </form>
+      {result.protest ? (
+        <div className="protest-note">
+          <strong>Protest · {protestStatusLabel(result.protest.status)}</strong>
+          <span>{result.protest.text}</span>
+          {result.protest.response ? <span>Host response: {result.protest.response}</span> : null}
+        </div>
+      ) : null}
+      {!result.protest || protestStatus === "pending" ? (
+        <form className="protest-form" onSubmit={submitProtest}>
+          <label>
+            Protest
+            <textarea
+              value={protestText}
+              onChange={(event) => setProtestText(event.target.value)}
+              maxLength={1000}
+              placeholder="Explain what you want the host to reconsider."
+            />
+          </label>
+          <button className="secondary submit-row" disabled={!protestText.trim()}>
+            <Send size={18} />
+            {result.protest ? "Update Protest" : "Submit Protest"}
+          </button>
+        </form>
+      ) : null}
       {status ? <div className="status-line">{status}</div> : null}
     </section>
   );

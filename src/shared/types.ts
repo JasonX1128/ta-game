@@ -10,6 +10,8 @@ export type Role = "host" | "team";
 
 export type Grade = "correct" | "incorrect";
 
+export type ProtestStatus = "pending" | "accepted" | "rejected";
+
 export type GradeSuggestion = {
   teamId: string;
   grade: Grade;
@@ -53,6 +55,9 @@ export type TeamRoundResult = {
   protest?: {
     text: string;
     createdAt: number;
+    status?: ProtestStatus;
+    response?: string;
+    resolvedAt?: number;
   };
 };
 

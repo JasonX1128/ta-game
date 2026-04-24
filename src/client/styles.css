@@ -942,6 +942,20 @@ h2 {
   min-height: 110px;
 }
 
+.protest-controls {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--surface-strong);
+}
+
+.protest-controls textarea {
+  min-height: 74px;
+}
+
 .feedback-note,
 .protest-note {
   grid-column: 1 / -1;
