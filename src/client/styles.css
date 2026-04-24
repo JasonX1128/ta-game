@@ -239,6 +239,10 @@ button:disabled {
   background: #e4ebe8;
 }
 
+.danger-text {
+  color: var(--red);
+}
+
 .wide {
   width: 100%;
 }
@@ -697,6 +701,11 @@ h2 {
 .stack-panels {
   display: grid;
   gap: 16px;
+}
+
+.host-game-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .centered {

@@ -27,6 +27,7 @@ export type GameSettings = {
   pointsPerCorrect: number;
   bonusByRank: number[];
   questions: Question[];
+  scrambleQuestionOrder: boolean;
   answerRevealMode: AnswerRevealMode;
   hideLeaderboardDuringAnswering: boolean;
   llmGradingEnabled: boolean;
@@ -135,6 +136,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   pointsPerCorrect: 10,
   bonusByRank: [10, 5, 2],
   questions: [],
+  scrambleQuestionOrder: false,
   answerRevealMode: "host_only",
   hideLeaderboardDuringAnswering: false,
   llmGradingEnabled: false

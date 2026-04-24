@@ -91,6 +91,7 @@ function cloneSettings(settings: GameSettings = DEFAULT_SETTINGS): GameSettings 
     pointsPerCorrect: settings.pointsPerCorrect,
     bonusByRank: [...settings.bonusByRank],
     questions: settings.questions.map((question) => ({ ...question })),
+    scrambleQuestionOrder: settings.scrambleQuestionOrder,
     answerRevealMode: settings.answerRevealMode,
     hideLeaderboardDuringAnswering: settings.hideLeaderboardDuringAnswering,
     llmGradingEnabled: settings.llmGradingEnabled
@@ -492,6 +493,7 @@ function validateSettings(settings: Partial<GameSettings>): GameSettings | strin
   const pointsPerCorrect = Number(settings.pointsPerCorrect);
   const bonusByRank = Array.isArray(settings.bonusByRank) ? settings.bonusByRank : [];
   const answerRevealMode = String(settings.answerRevealMode ?? DEFAULT_SETTINGS.answerRevealMode);
+  const scrambleQuestionOrder = Boolean(settings.scrambleQuestionOrder);
   const hideLeaderboardDuringAnswering = Boolean(settings.hideLeaderboardDuringAnswering);
   const llmGradingEnabled = Boolean(settings.llmGradingEnabled);
   const questions = validateQuestions(settings.questions);
@@ -528,6 +530,7 @@ function validateSettings(settings: Partial<GameSettings>): GameSettings | strin
     pointsPerCorrect,
     bonusByRank: parsedBonuses,
     questions,
+    scrambleQuestionOrder,
     answerRevealMode: answerRevealMode as AnswerRevealMode,
     hideLeaderboardDuringAnswering,
     llmGradingEnabled
@@ -828,6 +831,16 @@ function lowestAvailableWager(room: RoomRecord, team: TeamRecord): number | unde
   return undefined;
 }
 
+function shuffledQuestions(questions: Question[]): Question[] {
+  const next = questions.map((question) => ({ ...question }));
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+
+  return next;
+}
+
 function clearRoundTimer(room: RoomRecord): void {
   if (room.roundTimer) {
     clearTimeout(room.roundTimer);
@@ -843,6 +856,15 @@ function moveToGrading(room: RoomRecord): void {
   if (room.settings.llmGradingEnabled) {
     void cachedGemmaGradeSuggestions(room).catch(() => undefined);
   }
+  touch(room);
+}
+
+function finishGameEarly(room: RoomRecord): void {
+  resetCurrentRoundFields(room);
+  room.phase = "finished";
+  room.roundDurationSeconds = undefined;
+  room.roundEndsAt = undefined;
+  room.gradeSuggestionCache = undefined;
   touch(room);
 }
 
@@ -1105,11 +1127,39 @@ io.on("connection", (socket) => {
     room.history = [];
     room.adjustments = [];
     room.gradeSuggestionCache = undefined;
+    if (room.settings.scrambleQuestionOrder && room.settings.questions.length > 1) {
+      room.settings = {
+        ...room.settings,
+        questions: shuffledQuestions(room.settings.questions)
+      };
+    }
     room.currentRound = 1;
     room.phase = "round_setup";
     room.roundDurationSeconds = undefined;
     room.roundEndsAt = undefined;
     touch(room);
+    ok(ack, {});
+    broadcastState(room);
+  });
+
+  socket.on("game:endEarly", (payload: { code?: unknown; hostToken?: unknown }, ack?: AckCallback) => {
+    const room = requireHost(socket, ack, payload);
+    if (!room) {
+      return;
+    }
+
+    if (room.phase === "lobby") {
+      fail(socket, ack, "Start the game before ending it.");
+      return;
+    }
+
+    if (room.phase === "finished") {
+      ok(ack, {});
+      socket.emit("room:state", publicState(room, { code: room.code, role: "host" }));
+      return;
+    }
+
+    finishGameEarly(room);
     ok(ack, {});
     broadcastState(room);
   });

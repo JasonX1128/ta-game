@@ -35,6 +35,12 @@ This should make it easy to catch bad formatting, missing images, or wrong quest
 
 Status: implemented in the host lobby.
 
+### Scramble Question Order
+
+Let the host choose whether uploaded questions are shuffled when the game starts.
+
+Status: implemented as a lobby setting.
+
 ## Game Flow Improvements
 
 ### Question-By-Question History
@@ -92,6 +98,14 @@ Add a polished final standings screen for projecting:
 Status: implemented on the final standings screen.
 
 ## Host Controls
+
+### End Game Early
+
+Let the host end a game before all questions are completed and jump straight to final standings.
+
+The unfinished current round is not scored.
+
+Status: implemented during active games.
 
 ### Protest Grading
 

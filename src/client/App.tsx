@@ -689,6 +689,7 @@ function HostLobby({
   const [pointsPerCorrect, setPointsPerCorrect] = useState(String(room.settings.pointsPerCorrect));
   const [bonusText, setBonusText] = useState(room.settings.bonusByRank.join(","));
   const [answerRevealMode, setAnswerRevealMode] = useState<AnswerRevealMode>(room.settings.answerRevealMode);
+  const [scrambleQuestionOrder, setScrambleQuestionOrder] = useState(room.settings.scrambleQuestionOrder);
   const [hideLeaderboardDuringAnswering, setHideLeaderboardDuringAnswering] = useState(
     room.settings.hideLeaderboardDuringAnswering
   );
@@ -703,6 +704,7 @@ function HostLobby({
     setPointsPerCorrect(String(room.settings.pointsPerCorrect));
     setBonusText(room.settings.bonusByRank.join(","));
     setAnswerRevealMode(room.settings.answerRevealMode);
+    setScrambleQuestionOrder(room.settings.scrambleQuestionOrder);
     setHideLeaderboardDuringAnswering(room.settings.hideLeaderboardDuringAnswering);
     setLlmGradingEnabled(room.settings.llmGradingEnabled);
     if (room.settings.llmGradingEnabled) {
@@ -713,6 +715,7 @@ function HostLobby({
     room.settings.pointsPerCorrect,
     room.settings.bonusByRank.join(","),
     room.settings.answerRevealMode,
+    room.settings.scrambleQuestionOrder,
     room.settings.hideLeaderboardDuringAnswering,
     room.settings.llmGradingEnabled
   ]);
@@ -739,6 +742,7 @@ function HostLobby({
       pointsPerCorrect: Number(pointsPerCorrect),
       bonusByRank,
       questions: room.settings.questions,
+      scrambleQuestionOrder,
       answerRevealMode,
       hideLeaderboardDuringAnswering,
       llmGradingEnabled
@@ -764,6 +768,7 @@ function HostLobby({
         pointsPerCorrect: Number(pointsPerCorrect),
         bonusByRank,
         questions,
+        scrambleQuestionOrder,
         answerRevealMode,
         hideLeaderboardDuringAnswering,
         llmGradingEnabled
@@ -789,6 +794,7 @@ function HostLobby({
       pointsPerCorrect: Number(pointsPerCorrect),
       bonusByRank,
       questions: [],
+      scrambleQuestionOrder,
       answerRevealMode,
       hideLeaderboardDuringAnswering,
       llmGradingEnabled
@@ -853,6 +859,14 @@ function HostLobby({
             <label className="span-2">
               Rank bonuses
               <input value={bonusText} onChange={(event) => setBonusText(event.target.value)} />
+            </label>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={scrambleQuestionOrder}
+                onChange={(event) => setScrambleQuestionOrder(event.target.checked)}
+              />
+              Scramble question order at start
             </label>
             <label>
               Answer reveal
@@ -1096,23 +1110,66 @@ function HostGame({
   request: RequestFn;
   hostPayload: { code: string; hostToken: string };
 }) {
-  if (room.phase === "round_setup") {
-    return <HostRoundSetup room={room} request={request} hostPayload={hostPayload} />;
+  function gamePanel(): React.ReactNode {
+    if (room.phase === "round_setup") {
+      return <HostRoundSetup room={room} request={request} hostPayload={hostPayload} />;
+    }
+
+    if (room.phase === "answering") {
+      return <HostAnswering room={room} request={request} hostPayload={hostPayload} />;
+    }
+
+    if (room.phase === "grading") {
+      return <HostGrading room={room} request={request} hostPayload={hostPayload} />;
+    }
+
+    if (room.phase === "between_rounds") {
+      return <HostBetweenRounds room={room} request={request} hostPayload={hostPayload} />;
+    }
+
+    return <HostFinished room={room} request={request} hostPayload={hostPayload} />;
   }
 
-  if (room.phase === "answering") {
-    return <HostAnswering room={room} request={request} hostPayload={hostPayload} />;
+  if (room.phase === "finished") {
+    return gamePanel();
   }
 
-  if (room.phase === "grading") {
-    return <HostGrading room={room} request={request} hostPayload={hostPayload} />;
+  return (
+    <div className="stack-panels">
+      <HostGameActions request={request} hostPayload={hostPayload} />
+      {gamePanel()}
+    </div>
+  );
+}
+
+function HostGameActions({
+  request,
+  hostPayload
+}: {
+  request: RequestFn;
+  hostPayload: { code: string; hostToken: string };
+}) {
+  const [status, setStatus] = useState("");
+
+  async function endGameEarly(): Promise<void> {
+    const confirmed = window.confirm("End the game now? The current unfinished round will not be scored.");
+    if (!confirmed) {
+      return;
+    }
+
+    const response = await request("game:endEarly", hostPayload);
+    setStatus(response.ok ? "" : response.message);
   }
 
-  if (room.phase === "between_rounds") {
-    return <HostBetweenRounds room={room} request={request} hostPayload={hostPayload} />;
-  }
-
-  return <HostFinished room={room} request={request} hostPayload={hostPayload} />;
+  return (
+    <div className="host-game-actions">
+      <button className="secondary danger-text" onClick={endGameEarly}>
+        <X size={18} />
+        End Game Early
+      </button>
+      {status ? <div className="status-line">{status}</div> : null}
+    </div>
+  );
 }
 
 function HostRoundSetup({
@@ -1834,9 +1891,12 @@ function TeamGame({
   }
 
   if (room.phase === "finished") {
+    const hasCurrentRoundResult = room.history.some((entry) => entry.round === room.currentRound);
     return (
       <div className="stack-panels">
-        <TeamFinalizedGrade room={room} request={request} team={team} teamPayload={teamPayload} />
+        {hasCurrentRoundResult ? (
+          <TeamFinalizedGrade room={room} request={request} team={team} teamPayload={teamPayload} />
+        ) : null}
         <div className="flow-panel centered">
           <Trophy size={42} />
           <h2>Final standings</h2>
