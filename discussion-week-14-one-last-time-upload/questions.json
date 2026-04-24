@@ -1,0 +1,408 @@
+{
+  "questions": [
+    {
+      "text": "A system uses 48-bit virtual addresses and 40-bit physical addresses. The L1 cache is 64 KB, 4-way set-associative, with 64-byte lines. Each line stores 1 valid bit, 1 dirty bit, and 2 bits for LRU. Answer all parts in one response and label them A, B, and C.",
+      "minutes": 4,
+      "image": "q1.svg",
+      "imageAlt": "Cache address diagram showing tag, index, and offset fields for a 4-way set-associative cache.",
+      "parts": [
+        {
+          "id": "q1-a",
+          "label": "Part A",
+          "text": "Calculate the number of bits in the offset, index, and tag fields.",
+          "answer": "Offset = 6 bits, index = 8 bits, tag = 26 bits."
+        },
+        {
+          "id": "q1-b",
+          "label": "Part B",
+          "text": "What is the total size, in bytes, of the cache directory?",
+          "answer": "3840 bytes."
+        },
+        {
+          "id": "q1-c",
+          "label": "Part C",
+          "text": "If the cache were changed to direct-mapped while keeping the total size and line size the same, would the directory size increase or decrease?",
+          "answer": "Decrease."
+        }
+      ],
+      "topic": "Caches"
+    },
+    {
+      "text": "Consider the following Tinker code. Answer all parts in one response and label them A, B, and C.",
+      "minutes": 3,
+      "codeLanguage": "asm",
+      "code": "L1: mov  r1, (r2)\nL2: add  r3, r1, r4\nL3: mov  r1, r5\nL4: sub  r1, r1, r6\nL5: add  r4, r3, r1",
+      "image": "q2.svg",
+      "imageAlt": "Instruction dependency sketch for five assembly-like instructions.",
+      "parts": [
+        {
+          "id": "q2-a",
+          "label": "Part A",
+          "text": "Identify all RAW dependencies. You can write a dependency as L1 -> L2.",
+          "answer": "RAW dependencies:\nL1 -> L2 on r1\nL2 -> L5 on r3\nL3 -> L4 on r1\nL4 -> L5 on r1"
+        },
+        {
+          "id": "q2-b",
+          "label": "Part B",
+          "text": "Identify all WAR dependencies.",
+          "answer": "WAR dependencies:\nL2 -> L3 on r1\nL2 -> L5 on r4\nL2 -> L4 on r1 is sometimes noted, but it is usually treated as shadowed by the intervening write at L3."
+        },
+        {
+          "id": "q2-c",
+          "label": "Part C",
+          "text": "Identify all WAW dependencies.",
+          "answer": "WAW dependencies:\nL1 -> L3 on r1\nL3 -> L4 on r1\nL1 -> L4 on r1 is sometimes noted, but it is usually treated as shadowed by the intervening write at L3."
+        }
+      ],
+      "topic": "Pipelining"
+    },
+    {
+      "text": "Two cores, Core A and Core B, share a bus and use MESI snooping. A particular cache line starts invalid in both caches. The following actions occur in order. Answer both parts in one response and label them A and B.",
+      "minutes": 3,
+      "codeLanguage": "text",
+      "code": "1. Core A reads address X\n2. Core B reads address X\n3. Core B writes address X\n4. Core A reads address X",
+      "image": "q3.svg",
+      "imageAlt": "MESI timeline showing two cores and four bus events.",
+      "parts": [
+        {
+          "id": "q3-a",
+          "label": "Part A",
+          "text": "For each step, give the resulting MESI state in Core A and Core B.",
+          "answer": "Step 1: A = E, B = I\nStep 2: A = S, B = S\nStep 3: A = I, B = M\nStep 4: A = S, B = S"
+        },
+        {
+          "id": "q3-b",
+          "label": "Part B",
+          "text": "For each step, identify whether the interconnect sees a bus read or a bus invalidate.",
+          "answer": "Step 1: bus read\nStep 2: bus read\nStep 3: bus invalidate\nStep 4: bus read"
+        }
+      ],
+      "topic": "Memory Coherence"
+    },
+    {
+      "text": "Consider an out-of-order processor with 32 physical registers (P0-P31) and 8 architectural registers (r0-r7). Initially the Register Alias Table (RAT) maps ri -> Pi. Assume the renamer chooses the next free physical register in ascending order starting at P8. Answer both parts in one response and label them A and B.",
+      "minutes": 4,
+      "codeLanguage": "asm",
+      "code": "L1: mov  r1, (r2)\nL2: add  r3, r1, r4\nL3: mov  r1, r5\nL4: sub  r1, r1, r6\nL5: add  r4, r3, r1",
+      "image": "q4.svg",
+      "imageAlt": "Register renaming diagram mapping architectural registers to physical registers.",
+      "parts": [
+        {
+          "id": "q4-a",
+          "label": "Part A",
+          "text": "Show the RAT after each instruction is renamed. Use the format r0:PX | r1:PX | ... | r7:PX.",
+          "answer": "Initial: r0:P0 | r1:P1 | r2:P2 | r3:P3 | r4:P4 | r5:P5 | r6:P6 | r7:P7\nAfter L1: r0:P0 | r1:P8 | r2:P2 | r3:P3 | r4:P4 | r5:P5 | r6:P6 | r7:P7\nAfter L2: r0:P0 | r1:P8 | r2:P2 | r3:P9 | r4:P4 | r5:P5 | r6:P6 | r7:P7\nAfter L3: r0:P0 | r1:P10 | r2:P2 | r3:P9 | r4:P4 | r5:P5 | r6:P6 | r7:P7\nAfter L4: r0:P0 | r1:P11 | r2:P2 | r3:P9 | r4:P4 | r5:P5 | r6:P6 | r7:P7\nAfter L5: r0:P0 | r1:P11 | r2:P2 | r3:P9 | r4:P12 | r5:P5 | r6:P6 | r7:P7"
+        },
+        {
+          "id": "q4-b",
+          "label": "Part B",
+          "text": "Which dependencies are eliminated by renaming, and which remain as true dependencies?",
+          "answer": "WAR and WAW dependencies are eliminated by renaming. RAW dependencies remain because they reflect real data flow."
+        }
+      ],
+      "topic": "Pipelining"
+    },
+    {
+      "text": "A processor has a private L2 cache of 256 KB and a shared L3 cache of 2 MB. Answer all parts in one response and label them A, B, and C.",
+      "minutes": 3,
+      "image": "q5.svg",
+      "imageAlt": "Two-panel diagram comparing inclusive and exclusive cache hierarchies.",
+      "parts": [
+        {
+          "id": "q5-a",
+          "label": "Part A",
+          "text": "If the L3 is inclusive and a line is evicted from the L3 to make room for a new block, what message must be sent to the L2 caches?",
+          "answer": "A back-invalidation must be sent to any private caches holding that line."
+        },
+        {
+          "id": "q5-b",
+          "label": "Part B",
+          "text": "If the L3 is exclusive and acts as a victim cache, where is a data block placed when it is first fetched from main memory?",
+          "answer": "It is placed in the private cache hierarchy first, typically L2 and then L1 as needed."
+        },
+        {
+          "id": "q5-c",
+          "label": "Part C",
+          "text": "Which policy gives a higher total effective cache capacity: inclusive or exclusive?",
+          "answer": "Exclusive."
+        }
+      ],
+      "topic": "Caches"
+    },
+    {
+      "text": "A hardware prefetcher observes the following physical address accesses. Answer all parts in one response and label them A, B, and C.",
+      "minutes": 4,
+      "codeLanguage": "text",
+      "code": "0x7F000 -> 0x7F040 -> 0x7F080 -> 0x1A000 -> 0x7F0C0 -> 0x1A040",
+      "image": "q6.svg",
+      "imageAlt": "Two address streams with stride annotations and dashed prefetch targets.",
+      "parts": [
+        {
+          "id": "q6-a",
+          "label": "Part A",
+          "text": "Identify the two distinct streams the prefetcher should detect, including their stride.",
+          "answer": "Stream 1: 0x7F000 -> 0x7F040 -> 0x7F080 -> 0x7F0C0 with stride +0x40\nStream 2: 0x1A000 -> 0x1A040 with stride +0x40"
+        },
+        {
+          "id": "q6-b",
+          "label": "Part B",
+          "text": "If the prefetch degree is 2, list the next four addresses the hardware should speculatively fetch.",
+          "answer": "For Stream 1: 0x7F100 and 0x7F140\nFor Stream 2: 0x1A080 and 0x1A0C0"
+        },
+        {
+          "id": "q6-c",
+          "label": "Part C",
+          "text": "Describe one way prefetching could hurt performance instead of helping it.",
+          "answer": "It can cause cache pollution or waste bandwidth by fetching lines that evict useful data."
+        }
+      ],
+      "topic": "Performance Optimizations"
+    },
+    {
+      "text": "A single-cycle processor has component delays of Fetch = 2 ns, Decode = 1 ns, Execute = 4 ns, Memory = 10 ns, and Register Write = 1 ns. Answer all parts in one response and label them A, B, and C.",
+      "minutes": 3,
+      "image": "q7.svg",
+      "imageAlt": "Timing diagram comparing single-cycle and multi-cycle processor delays.",
+      "parts": [
+        {
+          "id": "q7-a",
+          "label": "Part A",
+          "text": "What is the minimum clock period for the single-cycle design?",
+          "answer": "18 ns."
+        },
+        {
+          "id": "q7-b",
+          "label": "Part B",
+          "text": "If each component becomes its own state in a multi-cycle design, what is the new clock period?",
+          "answer": "10 ns, because the clock must match the slowest state."
+        },
+        {
+          "id": "q7-c",
+          "label": "Part C",
+          "text": "A load takes 5 cycles in the multi-cycle design. What is the total time for one load in both designs, and which is faster for that instruction?",
+          "answer": "Single-cycle load time = 18 ns. Multi-cycle load time = 50 ns. The single-cycle design is faster for one load."
+        }
+      ],
+      "topic": "Single-Cycle vs Multi-Cycle"
+    },
+    {
+      "text": "Consider the following C code, where A is stored in row-major order. Answer all parts in one response and label them A, B, and C.",
+      "minutes": 4,
+      "codeLanguage": "c",
+      "code": "int A[128][128];\nfor (int j = 0; j < 128; j++)\n  for (int i = 0; i < 128; i++)\n    sum += A[i][j];",
+      "image": "q8.svg",
+      "imageAlt": "Matrix traversal diagram comparing column-wise and row-wise access patterns.",
+      "parts": [
+        {
+          "id": "q8-a",
+          "label": "Part A",
+          "text": "If the cache is 16 KB, direct-mapped, with 64-byte lines and 4-byte integers, what is the cache miss rate for the traversal shown?",
+          "answer": "100%."
+        },
+        {
+          "id": "q8-b",
+          "label": "Part B",
+          "text": "How would the miss rate change if the loops were swapped so i is outer and j is inner?",
+          "answer": "It would drop to 6.25%, or 1 miss per 16 integer accesses."
+        },
+        {
+          "id": "q8-c",
+          "label": "Part C",
+          "text": "What is the minimum value of N for an N x N matrix where a single row no longer fits in the 16 KB cache?",
+          "answer": "4097."
+        }
+      ],
+      "topic": "Caches"
+    },
+    {
+      "text": "Suppose a 5-stage pipeline is deepened into a 10-stage pipeline by splitting EX into EX1 through EX5. Assume every instruction goes through IF, ID, EX1, EX2, EX3, EX4, EX5, MEM, and WB. Answer both parts in one response and label them A and B.",
+      "minutes": 4,
+      "image": "q9.svg",
+      "imageAlt": "Pipeline timeline showing stalls for a RAW hazard with and without forwarding.",
+      "parts": [
+        {
+          "id": "q9-a",
+          "label": "Part A",
+          "text": "If a RAW hazard occurs between an add and the very next sub instruction, how many stall cycles are required if there is no forwarding?",
+          "answer": "7 stall cycles."
+        },
+        {
+          "id": "q9-b",
+          "label": "Part B",
+          "text": "If forwarding is available from the output of EX5 to the input of EX1, how many stall cycles are required, and how does that compare to Part A?",
+          "answer": "4 stall cycles, which is 3 fewer than without forwarding."
+        }
+      ],
+      "topic": "Pipelining"
+    },
+    {
+      "text": "A 4-way set-associative cache sees the following access stream, and every access maps to the same set. Answer both parts in one response and label them A and B.",
+      "minutes": 4,
+      "codeLanguage": "text",
+      "code": "A -> B -> C -> D -> E -> B -> A -> C",
+      "image": "q10.svg",
+      "imageAlt": "Replacement-policy comparison between LRU and FIFO for one cache set.",
+      "parts": [
+        {
+          "id": "q10-a",
+          "label": "Part A",
+          "text": "Show the set contents after each access using LRU, listed from MRU to LRU. How many misses occur?",
+          "answer": "Access A: [A, -, -, -]\nAccess B: [B, A, -, -]\nAccess C: [C, B, A, -]\nAccess D: [D, C, B, A]\nAccess E: [E, D, C, B] after evicting A\nAccess B: [B, E, D, C]\nAccess A: [A, B, E, D] after evicting C\nAccess C: [C, A, B, E] after evicting D\nTotal misses: 7"
+        },
+        {
+          "id": "q10-b",
+          "label": "Part B",
+          "text": "Show the set contents after each access using FIFO, listed from newest to oldest inserted. How many misses occur?",
+          "answer": "Access A: [A, -, -, -]\nAccess B: [B, A, -, -]\nAccess C: [C, B, A, -]\nAccess D: [D, C, B, A]\nAccess E: [E, D, C, B] after evicting A\nAccess B: [E, D, C, B] hit, no reordering\nAccess A: [A, E, D, C] after evicting B\nAccess C: [A, E, D, C] hit, no reordering\nTotal misses: 6"
+        }
+      ],
+      "topic": "Caches"
+    },
+    {
+      "text": "A loop executes 100 times. The branch at the end of the loop is taken 99 times and not taken once. Assume a misprediction penalty of 2 cycles. Answer both parts in one response and label them A and B.",
+      "minutes": 3,
+      "image": "q11.svg",
+      "imageAlt": "Loop branch predictor diagram comparing static not-taken and a 1-bit predictor.",
+      "parts": [
+        {
+          "id": "q11-a",
+          "label": "Part A",
+          "text": "If the processor uses a static predict-not-taken strategy, how many total stall cycles does this branch cause?",
+          "answer": "198 stall cycles."
+        },
+        {
+          "id": "q11-b",
+          "label": "Part B",
+          "text": "If the processor uses a 1-bit dynamic predictor initialized to not taken, how many total mispredictions occur?",
+          "answer": "2 mispredictions."
+        }
+      ],
+      "topic": "Pipelining"
+    },
+    {
+      "text": "Consider the following C code and assume x and y occupy the same cache line. Answer both parts in one response and label them A and B.",
+      "minutes": 2,
+      "codeLanguage": "c",
+      "code": "struct data { int x; int y; } s;\nfor (int i = 0; i < 1000; i++) s.x++;  // Thread 1\nfor (int i = 0; i < 1000; i++) s.y++;  // Thread 2",
+      "image": "q12.svg",
+      "imageAlt": "False-sharing diagram showing two cores bouncing ownership of one cache line.",
+      "parts": [
+        {
+          "id": "q12-a",
+          "label": "Part A",
+          "text": "Why will these threads experience poor performance on a multi-core system?",
+          "answer": "False sharing."
+        },
+        {
+          "id": "q12-b",
+          "label": "Part B",
+          "text": "How would you fix the issue from Part A?",
+          "answer": "Pad or align the structure so x and y live on different cache lines."
+        }
+      ],
+      "topic": "Memory Issues"
+    },
+    {
+      "text": "A sector cache stores one tag per 128-byte sector, and each sector is divided into two 64-byte sub-blocks with separate valid bits. The cache is 32 KB and direct-mapped. Answer all parts in one response and label them A, B, and C.",
+      "minutes": 3,
+      "image": "q13.svg",
+      "imageAlt": "Sector cache diagram with one shared tag and two valid bits for two sub-blocks.",
+      "parts": [
+        {
+          "id": "q13-a",
+          "label": "Part A",
+          "text": "How many tags are stored in the directory?",
+          "answer": "256 tags."
+        },
+        {
+          "id": "q13-b",
+          "label": "Part B",
+          "text": "A load misses on address 0x1000 in sub-block 0, and the hardware fetches 64 bytes. Are both valid bits set to 1?",
+          "answer": "No. Only the fetched sub-block becomes valid."
+        },
+        {
+          "id": "q13-c",
+          "label": "Part C",
+          "text": "What is the primary disadvantage of this design compared to a standard 64-byte-line cache with separate tags?",
+          "answer": "Higher conflict miss rate and poorer utilization when spatial locality is low."
+        }
+      ],
+      "topic": "Caches"
+    },
+    {
+      "text": "Compare write-through coherence behavior with ordinary snooping rules. Answer both parts in one response and label them A and B.",
+      "minutes": 3,
+      "image": "q14.svg",
+      "imageAlt": "Coherence sketch showing write-through updates to memory and invalidations to peer caches.",
+      "parts": [
+        {
+          "id": "q14-a",
+          "label": "Part A",
+          "text": "If a system is write-through, does a core ever need to snoop a read from another core? Explain briefly.",
+          "answer": "No. Because every write immediately updates memory, main memory always has the latest value and can satisfy read misses without another cache intervening."
+        },
+        {
+          "id": "q14-b",
+          "label": "Part B",
+          "text": "Does the system still need to snoop writes? Explain briefly.",
+          "answer": "Yes. Other cached copies must be invalidated or updated when a peer writes, otherwise they would keep stale data."
+        }
+      ],
+      "topic": "Memory Coherence"
+    },
+    {
+      "text": "A designer increases a pipeline from 5 stages at 1 GHz to 15 stages at 3 GHz. Assume an ideal base CPI of 1.0 for both pipelines. Also assume the 15-stage pipeline has a 12-cycle branch penalty, the 5-stage pipeline has a 2-cycle branch penalty, and 20% of instructions are branches. Use Throughput = 1 / (CPI * Clock Period). Answer all parts in one response and label them A, B, and C.",
+      "minutes": 4,
+      "image": "q15.svg",
+      "imageAlt": "Comparison of a 5-stage 1 GHz pipeline and a 15-stage 3 GHz pipeline with branch penalties.",
+      "parts": [
+        {
+          "id": "q15-a",
+          "label": "Part A",
+          "text": "How long, in nanoseconds, does it take one instruction to travel through the full pipeline in each design?",
+          "answer": "5-stage pipeline: 5 ns. 15-stage pipeline: 5 ns."
+        },
+        {
+          "id": "q15-b",
+          "label": "Part B",
+          "text": "For the 15-stage pipeline, what is the CPI loss due to branches?",
+          "answer": "2.4 extra CPI."
+        },
+        {
+          "id": "q15-c",
+          "label": "Part C",
+          "text": "Compute the throughput of both pipelines and state which one is faster.",
+          "answer": "5-stage: branch loss = 2 * 0.2 = 0.4, so total CPI = 1.4 and throughput = 1 / (1.4 * 1 ns) = 0.714 GIPS.\n15-stage: branch loss = 12 * 0.2 = 2.4, so total CPI = 3.4 and throughput = 1 / (3.4 * 0.333 ns) = 0.882 GIPS.\nThe 15-stage, 3 GHz pipeline is faster."
+        }
+      ],
+      "topic": "Pipelining"
+    },
+    {
+      "text": "In a directory-based protocol, Core 0 misses on a read for address 0x1000. The directory entry for 0x1000 says Core 2 is the owner and currently has the block in Modified state. Assume MESI. Answer all parts in one response and label them A, B, and C.",
+      "minutes": 4,
+      "image": "q16.svg",
+      "imageAlt": "Directory-based coherence message flow from Core 0 to the home directory to Core 2 and back.",
+      "parts": [
+        {
+          "id": "q16-a",
+          "label": "Part A",
+          "text": "List the three specific messages required to resolve the miss, and identify the sender and receiver of each.",
+          "answer": "1. Read request or Get Shared: Core 0 -> Directory\n2. Forwarded read or intervention: Directory -> Core 2\n3. Data response: Core 2 -> Core 0"
+        },
+        {
+          "id": "q16-b",
+          "label": "Part B",
+          "text": "After Core 0 receives the data, what are the new states in Core 0, Core 2, and the directory entry?",
+          "answer": "Core 0 = Shared, Core 2 = Shared, Directory = Shared with Core 0 and Core 2 listed as sharers."
+        },
+        {
+          "id": "q16-c",
+          "label": "Part C",
+          "text": "What main problem does a directory-based protocol solve compared to a snooping-based protocol?",
+          "answer": "Scalability. It avoids broadcasting coherence traffic to every core on every transaction."
+        }
+      ],
+      "topic": "Memory Coherence"
+    }
+  ]
+}

@@ -36,6 +36,7 @@ export type GameSettings = {
 };
 
 export type Question = {
+  topic?: string;
   text: string;
   code?: string;
   codeLanguage?: string;
@@ -177,6 +178,12 @@ export const DEFAULT_SETTINGS: GameSettings = {
 };
 
 export const SINGLE_PART_ID = "main";
+export const DEFAULT_QUESTION_TOPIC = "General question";
+
+export function questionTopic(question?: Question): string {
+  const topic = question?.topic?.trim();
+  return topic || DEFAULT_QUESTION_TOPIC;
+}
 
 export function questionParts(question?: Question): QuestionPart[] {
   if (!question) {

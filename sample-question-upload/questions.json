@@ -1,6 +1,7 @@
 {
   "questions": [
     {
+      "topic": "Python debugging",
       "text": "Read the function below. What bug would make this fail for an empty list?",
       "minutes": 2,
       "codeLanguage": "python",
@@ -10,6 +11,7 @@
       "imageAlt": "A small diagram showing values flowing into an average function"
     },
     {
+      "topic": "Async JavaScript",
       "text": "The chart shows the order that three async tasks completed. Explain why the printed output might not match the order the tasks were started.",
       "minutes": 3,
       "codeLanguage": "javascript",
@@ -19,6 +21,7 @@
       "imageAlt": "Timeline of async task completions"
     },
     {
+      "topic": "SQL aggregation",
       "text": "No image on this one. What does this SQL query return, and what edge case should you watch for?",
       "minutes": 2.5,
       "codeLanguage": "sql",
@@ -26,6 +29,7 @@
       "answer": "It returns active employee counts grouped by department, ordered largest to smallest. Watch for NULL departments being grouped together."
     },
     {
+      "topic": "Multipart debugging",
       "text": "Multipart debugging question. Put both answers in the same team answer box.",
       "minutes": 4,
       "parts": [

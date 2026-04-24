@@ -565,11 +565,30 @@ h2 {
   letter-spacing: 0.08em;
 }
 
+.question-topic {
+  margin-top: 6px;
+  font-weight: 800;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.question-topic.prominent {
+  margin-top: 8px;
+  font-size: 1.15rem;
+}
+
 .question-text {
   margin-top: 8px;
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.round-topic-card {
+  border: 1px solid #d8d2bf;
+  border-radius: 8px;
+  padding: 14px;
+  background: #f6f0dd;
 }
 
 .question-image {
@@ -844,6 +863,10 @@ h2 {
 .locked-wager {
   background: var(--green-soft);
   color: #165d45;
+}
+
+.flow-panel .round-topic-card {
+  margin-bottom: 16px;
 }
 
 .wager-grid {

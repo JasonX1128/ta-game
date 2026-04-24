@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
-import { questionParts } from "../shared/types";
+import { questionParts, questionTopic } from "../shared/types";
 import type {
   Ack,
   AnswerRevealMode,
@@ -287,6 +287,7 @@ async function parseQuestionUpload(fileList: FileList | null): Promise<Question[
     }
 
     const candidate = rawQuestion as {
+      topic?: unknown;
       text?: unknown;
       code?: unknown;
       codeLanguage?: unknown;
@@ -298,6 +299,7 @@ async function parseQuestionUpload(fileList: FileList | null): Promise<Question[
       imageName?: unknown;
       imageAlt?: unknown;
     };
+    const topic = typeof candidate.topic === "string" ? candidate.topic.trim() : "";
     const text = typeof candidate.text === "string" ? candidate.text.trim() : "";
     const code = typeof candidate.code === "string" ? candidate.code : undefined;
     const codeLanguage =
@@ -317,6 +319,10 @@ async function parseQuestionUpload(fileList: FileList | null): Promise<Question[
 
     if (!text) {
       throw new Error(`Question ${index + 1} needs text.`);
+    }
+
+    if (topic.length > 120) {
+      throw new Error(`Question ${index + 1} topic must be 120 characters or fewer.`);
     }
 
     if (minutes !== undefined && (!Number.isFinite(minutes) || minutes <= 0 || minutes > 180)) {
@@ -372,6 +378,7 @@ async function parseQuestionUpload(fileList: FileList | null): Promise<Question[
     }
 
     questions.push({
+      topic: topic || undefined,
       text,
       code,
       codeLanguage: codeLanguage?.trim() || undefined,
@@ -1198,6 +1205,19 @@ function currentQuestion(room: PublicRoomState): Question | undefined {
   return room.settings.questions[room.currentRound - 1];
 }
 
+function RoundTopicCard({ question, round }: { question?: Question; round: number }) {
+  if (!question) {
+    return null;
+  }
+
+  return (
+    <article className="round-topic-card">
+      <div className="question-label">Round {round} topic</div>
+      <div className="question-topic prominent">{questionTopic(question)}</div>
+    </article>
+  );
+}
+
 function QuestionCard({
   question,
   round,
@@ -1217,6 +1237,12 @@ function QuestionCard({
 
   return (
     <article className={compact ? "question-card compact" : "question-card"}>
+      {question.topic ? (
+        <>
+          <div className="question-label">Topic</div>
+          <div className="question-topic">{question.topic}</div>
+        </>
+      ) : null}
       <div className="question-label">Question {round}</div>
       <div className="question-text">{question.text}</div>
       {question.imageDataUrl ? (
@@ -1281,7 +1307,10 @@ function QuestionPreviewList({ questions }: { questions: Question[] }) {
         {questions.map((question, index) => (
           <details className="preview-item" key={`${index}-${question.text.slice(0, 20)}`}>
             <summary>
-              <span>Question {index + 1}</span>
+              <span>
+                Question {index + 1}
+                {question.topic ? ` · ${question.topic}` : ""}
+              </span>
               <span>
                 {question.minutes ? `${question.minutes} min` : "Timer manual"}
                 {question.imageDataUrl ? " · image" : ""}
@@ -1418,6 +1447,7 @@ function HostRoundSetup({
 
   return (
     <div className="flow-panel">
+      <RoundTopicCard question={currentQuestion(room)} round={room.currentRound} />
       <div className="round-toolbar">
         <label>
           Minutes {questionMinutes ? "(from question)" : ""}
@@ -2418,6 +2448,7 @@ function TeamWager({
   const [selected, setSelected] = useState<number | null>(null);
   const [status, setStatus] = useState("");
   const values = wagerValues(room.settings.questionCount);
+  const question = currentQuestion(room);
 
   async function submitWager(): Promise<void> {
     const response = await request("wager:submit", { ...teamPayload, wager: selected });
@@ -2435,6 +2466,7 @@ function TeamWager({
         </div>
         {team.currentWager ? <div className="locked-wager">Locked: {team.currentWager}</div> : null}
       </div>
+      <RoundTopicCard question={question} round={room.currentRound} />
       <div className="wager-grid">
         {values.map((value) => {
           const used = team.usedWagers.includes(value);

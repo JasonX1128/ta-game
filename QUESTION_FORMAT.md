@@ -6,6 +6,7 @@ Upload either a single `questions.json` file or one folder containing `questions
 {
   "questions": [
     {
+      "topic": "Debugging",
       "text": "Read the snippet and identify the bug.",
       "minutes": 3,
       "codeLanguage": "python",
@@ -14,10 +15,12 @@ Upload either a single `questions.json` file or one folder containing `questions
       "image": "q1.png"
     },
     {
+      "topic": "Async JavaScript",
       "text": "Explain what this output means.",
       "code": "console.log([1, 2, 3].map(x => x * x));"
     },
     {
+      "topic": "Multipart",
       "text": "This is a multipart question. Answer each part in the same response box.",
       "minutes": 4,
       "parts": [
@@ -45,6 +48,7 @@ Upload either a single `questions.json` file or one folder containing `questions
 
 Rules:
 
+- `topic` is optional and shown to teams while they choose a wager. If omitted, the app shows `General question`.
 - `text` is required.
 - `code` is optional.
 - `codeLanguage` is optional and displayed as a small label above the code block.

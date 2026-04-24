@@ -509,6 +509,7 @@ function validateQuestion(rawQuestion: unknown, index: number): Question | strin
   }
 
   const candidate = rawQuestion as Partial<Question>;
+  const topic = typeof candidate.topic === "string" ? candidate.topic.trim() : undefined;
   const text = String(candidate.text ?? "").trim();
   const code = typeof candidate.code === "string" ? candidate.code : undefined;
   const codeLanguage =
@@ -522,6 +523,10 @@ function validateQuestion(rawQuestion: unknown, index: number): Question | strin
 
   if (!text) {
     return `Question ${index + 1} needs text.`;
+  }
+
+  if (topic && topic.length > 120) {
+    return `Question ${index + 1} topic must be 120 characters or fewer.`;
   }
 
   if (text.length > 5000) {
@@ -589,6 +594,7 @@ function validateQuestion(rawQuestion: unknown, index: number): Question | strin
   }
 
   return {
+    topic: topic || undefined,
     text,
     code: code || undefined,
     codeLanguage: codeLanguage || undefined,
