@@ -857,7 +857,7 @@ function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>, parts
   }
 
   const validPartIds = new Set(parts.map((part) => part.id));
-  return suggestions.flatMap((item) => {
+  const parsedSuggestions = suggestions.flatMap((item) => {
     if (!item || typeof item !== "object") {
       return [];
     }
@@ -882,7 +882,7 @@ function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>, parts
         }, 0))
         : undefined
     );
-    const finalGrade = grade === "correct" || grade === "incorrect"
+    const finalGrade: Grade = grade === "correct" || grade === "incorrect"
       ? grade
       : credit !== undefined && credit >= 0.999
         ? "correct"
@@ -908,10 +908,28 @@ function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>, parts
       partSuggestions
     }];
   });
+
+  if (suggestions.length > 0 && parsedSuggestions.length === 0) {
+    throw new Error("AI response did not include suggestions for the current teams.");
+  }
+
+  return parsedSuggestions;
 }
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function stringifyForDebug(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSuggestion[]> {
@@ -1031,7 +1049,7 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
     try {
       return { ok: true, data: JSON.parse(text) as unknown };
     } catch {
-      throw new Error("Gemma response was not valid JSON.");
+      throw new Error(`Gemma response was not valid JSON.\n\nFull Gemma response:\n${text}`);
     }
   }
 
@@ -1062,15 +1080,24 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
   }
 
   if (!result.ok) {
-    throw new Error(`Gemma request failed (${result.status}): ${result.text.slice(0, 300)}`);
+    throw new Error(`Gemma request failed (${result.status}).\n\nFull Gemma response:\n${result.text}`);
   }
 
   const text = extractGemmaText(result.data);
   if (!text) {
-    throw new Error("Gemma response did not contain text.");
+    throw new Error(
+      `Gemma response did not contain text.\n\nFull Gemma response:\n${stringifyForDebug(result.data)}`
+    );
   }
 
-  return parseGemmaSuggestions(text, validTeamIds, parts);
+  try {
+    return parseGemmaSuggestions(text, validTeamIds, parts);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not parse Gemma suggestions.";
+    throw new Error(
+      `${message}\n\nFull Gemma model text:\n${text}\n\nFull Gemma response:\n${stringifyForDebug(result.data)}`
+    );
+  }
 }
 
 async function cachedGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSuggestion[]> {
