@@ -5,6 +5,7 @@
       "minutes": 2,
       "codeLanguage": "python",
       "code": "def average(values):\n    total = sum(values)\n    return total / len(values)",
+      "answer": "The function divides by len(values), so an empty list causes a division-by-zero error. A guard clause or explicit empty-list policy is needed.",
       "image": "q1.svg",
       "imageAlt": "A small diagram showing values flowing into an average function"
     },
@@ -13,6 +14,7 @@
       "minutes": 3,
       "codeLanguage": "javascript",
       "code": "const tasks = [fetchA(), fetchB(), fetchC()];\nfor (const task of tasks) {\n  console.log(await task);\n}",
+      "answer": "All tasks start before the loop awaits them, so completion order can differ from start order. The loop logs in array order, not completion order.",
       "image": "q2.svg",
       "imageAlt": "Timeline of async task completions"
     },
@@ -20,7 +22,8 @@
       "text": "No image on this one. What does this SQL query return, and what edge case should you watch for?",
       "minutes": 2.5,
       "codeLanguage": "sql",
-      "code": "SELECT department, COUNT(*) AS total\nFROM employees\nWHERE active = true\nGROUP BY department\nORDER BY total DESC;"
+      "code": "SELECT department, COUNT(*) AS total\nFROM employees\nWHERE active = true\nGROUP BY department\nORDER BY total DESC;",
+      "answer": "It returns active employee counts grouped by department, ordered largest to smallest. Watch for NULL departments being grouped together."
     }
   ]
 }

@@ -26,6 +26,7 @@ export type Question = {
   code?: string;
   codeLanguage?: string;
   minutes?: number;
+  answer?: string;
   imageDataUrl?: string;
   imageName?: string;
   imageAlt?: string;
@@ -39,6 +40,10 @@ export type TeamRoundResult = {
   grade: Grade;
   scoreDelta: number;
   bonusDelta: number;
+  protest?: {
+    text: string;
+    createdAt: number;
+  };
 };
 
 export type RoundHistoryEntry = {

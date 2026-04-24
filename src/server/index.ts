@@ -89,6 +89,29 @@ function cloneSettings(settings: GameSettings = DEFAULT_SETTINGS): GameSettings 
   };
 }
 
+function publicSettings(room: RoomRecord, context: SocketContext): GameSettings {
+  const settings = cloneSettings(room.settings);
+  if (context.role === "host") {
+    return settings;
+  }
+
+  settings.questions = settings.questions.map((question, index) => {
+    const roundNumber = index + 1;
+    const answerIsReleased =
+      roundNumber < room.currentRound ||
+      (roundNumber === room.currentRound && ["between_rounds", "finished"].includes(room.phase));
+
+    if (answerIsReleased) {
+      return question;
+    }
+
+    const { answer: _answer, ...questionWithoutAnswer } = question;
+    return questionWithoutAnswer;
+  });
+
+  return settings;
+}
+
 function makeToken(): string {
   return crypto.randomBytes(18).toString("base64url");
 }
@@ -229,7 +252,7 @@ function publicState(room: RoomRecord, context: SocketContext): PublicRoomState 
     role: context.role,
     viewerTeamId: context.teamId,
     phase: room.phase,
-    settings: cloneSettings(room.settings),
+    settings: publicSettings(room, context),
     teams,
     leaderboard,
     history: publicHistory(room, context),
@@ -358,6 +381,7 @@ function validateQuestion(rawQuestion: unknown, index: number): Question | strin
   const codeLanguage =
     typeof candidate.codeLanguage === "string" ? candidate.codeLanguage.trim().slice(0, 32) : undefined;
   const minutes = candidate.minutes === undefined ? undefined : Number(candidate.minutes);
+  const answer = typeof candidate.answer === "string" ? candidate.answer.trim() : undefined;
   const imageDataUrl = typeof candidate.imageDataUrl === "string" ? candidate.imageDataUrl : undefined;
   const imageName = typeof candidate.imageName === "string" ? candidate.imageName.trim().slice(0, 140) : undefined;
   const imageAlt = typeof candidate.imageAlt === "string" ? candidate.imageAlt.trim().slice(0, 180) : undefined;
@@ -378,6 +402,10 @@ function validateQuestion(rawQuestion: unknown, index: number): Question | strin
     return `Question ${index + 1} minutes must be greater than 0 and no more than 180.`;
   }
 
+  if (answer && answer.length > 10000) {
+    return `Question ${index + 1} answer must be 10000 characters or fewer.`;
+  }
+
   if (imageDataUrl) {
     if (!/^data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,/i.test(imageDataUrl)) {
       return `Question ${index + 1} image must be a PNG, JPG, GIF, WebP, or SVG data URL.`;
@@ -393,6 +421,7 @@ function validateQuestion(rawQuestion: unknown, index: number): Question | strin
     code: code || undefined,
     codeLanguage: codeLanguage || undefined,
     minutes,
+    answer: answer || undefined,
     imageDataUrl,
     imageName,
     imageAlt
@@ -1018,6 +1047,49 @@ io.on("connection", (socket) => {
       } else {
         room.phase = "between_rounds";
       }
+
+      touch(room);
+      ok(ack, {});
+      broadcastState(room);
+    }
+  );
+
+  socket.on(
+    "protest:submit",
+    (payload: { code?: unknown; teamToken?: unknown; text?: unknown }, ack?: AckCallback) => {
+      const result = requireTeam(socket, ack, payload);
+      if (!result) {
+        return;
+      }
+
+      const { room, team } = result;
+      if (room.phase !== "between_rounds" && room.phase !== "finished") {
+        fail(socket, ack, "Protests open after grades are finalized.");
+        return;
+      }
+
+      const text = String(payload.text ?? "").trim();
+      if (!text) {
+        fail(socket, ack, "Protest text is required.");
+        return;
+      }
+
+      if (text.length > 1000) {
+        fail(socket, ack, "Protest must be 1000 characters or fewer.");
+        return;
+      }
+
+      const historyEntry = room.history.find((entry) => entry.round === room.currentRound);
+      const teamResult = historyEntry?.results.find((entry) => entry.teamId === team.id);
+      if (!historyEntry || !teamResult) {
+        fail(socket, ack, "No finalized grade is available to protest.");
+        return;
+      }
+
+      teamResult.protest = {
+        text,
+        createdAt: Date.now()
+      };
 
       touch(room);
       ok(ack, {});

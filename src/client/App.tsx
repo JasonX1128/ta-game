@@ -191,6 +191,7 @@ async function parseQuestionUpload(fileList: FileList | null): Promise<Question[
       codeLanguage?: unknown;
       language?: unknown;
       minutes?: unknown;
+      answer?: unknown;
       image?: unknown;
       imageName?: unknown;
       imageAlt?: unknown;
@@ -210,6 +211,7 @@ async function parseQuestionUpload(fileList: FileList | null): Promise<Question[
           ? candidate.imageName
           : undefined;
     const minutes = candidate.minutes === undefined ? undefined : Number(candidate.minutes);
+    const answer = typeof candidate.answer === "string" ? candidate.answer.trim() : undefined;
 
     if (!text) {
       throw new Error(`Question ${index + 1} needs text.`);
@@ -217,6 +219,10 @@ async function parseQuestionUpload(fileList: FileList | null): Promise<Question[
 
     if (minutes !== undefined && (!Number.isFinite(minutes) || minutes <= 0 || minutes > 180)) {
       throw new Error(`Question ${index + 1} minutes must be greater than 0 and no more than 180.`);
+    }
+
+    if (answer && answer.length > 10000) {
+      throw new Error(`Question ${index + 1} answer must be 10000 characters or fewer.`);
     }
 
     let imageFile: File | undefined;
@@ -244,6 +250,7 @@ async function parseQuestionUpload(fileList: FileList | null): Promise<Question[
       code,
       codeLanguage: codeLanguage?.trim() || undefined,
       minutes,
+      answer: answer || undefined,
       imageDataUrl: imageFile ? await readFileAsDataUrl(imageFile) : undefined,
       imageName: imageFile?.name,
       imageAlt: typeof candidate.imageAlt === "string" ? candidate.imageAlt : undefined
@@ -288,7 +295,8 @@ function buildResultsCsv(room: PublicRoomState): string {
   const roundHeaders = Array.from({ length: maxRound }, (_item, index) => [
     `R${index + 1} Wager`,
     `R${index + 1} Grade`,
-    `R${index + 1} Answer`
+    `R${index + 1} Answer`,
+    `R${index + 1} Protest`
   ]).flat();
   const headers = [
     "Team",
@@ -332,7 +340,7 @@ function buildResultsCsv(room: PublicRoomState): string {
 
     const roundCells = Array.from({ length: maxRound }, (_item, index) => {
       const result = results[index];
-      return [result?.wager ?? "", result?.grade ?? "", result?.answer ?? ""];
+      return [result?.wager ?? "", result?.grade ?? "", result?.answer ?? "", result?.protest?.text ?? ""];
     }).flat();
 
     return [
@@ -884,7 +892,17 @@ function currentQuestion(room: PublicRoomState): Question | undefined {
   return room.settings.questions[room.currentRound - 1];
 }
 
-function QuestionCard({ question, round, compact = false }: { question?: Question; round: number; compact?: boolean }) {
+function QuestionCard({
+  question,
+  round,
+  compact = false,
+  showAnswer = false
+}: {
+  question?: Question;
+  round: number;
+  compact?: boolean;
+  showAnswer?: boolean;
+}) {
   if (!question) {
     return null;
   }
@@ -904,7 +922,17 @@ function QuestionCard({ question, round, compact = false }: { question?: Questio
           </pre>
         </div>
       ) : null}
+      {showAnswer && question.answer ? <OfficialAnswer answer={question.answer} /> : null}
     </article>
+  );
+}
+
+function OfficialAnswer({ answer }: { answer: string }) {
+  return (
+    <div className="official-answer">
+      <div className="question-label">Official Answer</div>
+      <div className="answer-text">{answer}</div>
+    </div>
   );
 }
 
@@ -928,9 +956,10 @@ function QuestionPreviewList({ questions }: { questions: Question[] }) {
                 {question.minutes ? `${question.minutes} min` : "Timer manual"}
                 {question.imageDataUrl ? " · image" : ""}
                 {question.code ? " · code" : ""}
+                {question.answer ? " · answer" : ""}
               </span>
             </summary>
-            <QuestionCard question={question} round={index + 1} compact />
+            <QuestionCard question={question} round={index + 1} compact showAnswer />
           </details>
         ))}
       </div>
@@ -1088,7 +1117,7 @@ function HostGrading({
 
   return (
     <div className="flow-panel">
-      <QuestionCard question={currentQuestion(room)} round={room.currentRound} />
+      <QuestionCard question={currentQuestion(room)} round={room.currentRound} showAnswer />
       {reviewing ? (
         <GradeReview room={room} grades={grades} onEdit={() => setReviewing(false)} onSubmit={submitGrades} />
       ) : (
@@ -1387,7 +1416,7 @@ function RoundHistoryPanel({ room }: { room: PublicRoomState }) {
               <span>Round {entry.round}</span>
               <span>{entry.results.length} results</span>
             </summary>
-            {entry.question ? <QuestionCard question={entry.question} round={entry.round} compact /> : null}
+            {entry.question ? <QuestionCard question={entry.question} round={entry.round} compact showAnswer /> : null}
             <div className="history-results">
               {entry.results.map((result) => (
                 <div className="history-result" key={result.teamId}>
@@ -1402,6 +1431,12 @@ function RoundHistoryPanel({ room }: { room: PublicRoomState }) {
                   <div className="history-delta">
                     Score +{formatPoints(result.scoreDelta)} · Bonus +{formatPoints(result.bonusDelta)}
                   </div>
+                  {result.protest ? (
+                    <div className="protest-note">
+                      <strong>Protest</strong>
+                      <span>{result.protest.text}</span>
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -1448,6 +1483,7 @@ function TeamGame({
   if (room.phase === "finished") {
     return (
       <div className="stack-panels">
+        <TeamFinalizedGrade room={room} request={request} team={team} teamPayload={teamPayload} />
         <div className="flow-panel centered">
           <Trophy size={42} />
           <h2>Final standings</h2>
@@ -1460,12 +1496,76 @@ function TeamGame({
 
   return (
     <div className="stack-panels">
+      <TeamFinalizedGrade room={room} request={request} team={team} teamPayload={teamPayload} />
+      <RoundHistoryPanel room={room} />
+    </div>
+  );
+}
+
+function TeamFinalizedGrade({
+  room,
+  request,
+  team,
+  teamPayload
+}: {
+  room: PublicRoomState;
+  request: RequestFn;
+  team: PublicTeam;
+  teamPayload: { code: string; teamToken: string };
+}) {
+  const [protestText, setProtestText] = useState("");
+  const [status, setStatus] = useState("");
+  const historyEntry = room.history.find((entry) => entry.round === room.currentRound);
+  const result = historyEntry?.results.find((entry) => entry.teamId === team.id);
+
+  useEffect(() => {
+    setProtestText(result?.protest?.text ?? "");
+  }, [room.currentRound, result?.protest?.text]);
+
+  if (!historyEntry || !result) {
+    return (
       <div className="flow-panel centered">
         <Trophy size={36} />
         <h2>Round {room.currentRound} scored</h2>
       </div>
-      <RoundHistoryPanel room={room} />
-    </div>
+    );
+  }
+
+  async function submitProtest(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    const response = await request("protest:submit", { ...teamPayload, text: protestText });
+    setStatus(response.ok ? "Protest sent." : response.message);
+  }
+
+  return (
+    <section className="flow-panel">
+      <QuestionCard question={historyEntry.question} round={historyEntry.round} showAnswer />
+      <div className="finalized-grade">
+        <div>
+          <span className="eyebrow">Your Grade</span>
+          <h2>{result.grade === "correct" ? "Correct" : "Incorrect"}</h2>
+        </div>
+        <div className="history-delta">
+          Score +{formatPoints(result.scoreDelta)} · Bonus +{formatPoints(result.bonusDelta)}
+        </div>
+      </div>
+      <form className="protest-form" onSubmit={submitProtest}>
+        <label>
+          Protest
+          <textarea
+            value={protestText}
+            onChange={(event) => setProtestText(event.target.value)}
+            maxLength={1000}
+            placeholder="Explain what you want the host to reconsider."
+          />
+        </label>
+        <button className="secondary submit-row" disabled={!protestText.trim()}>
+          <Send size={18} />
+          {result.protest ? "Update Protest" : "Submit Protest"}
+        </button>
+      </form>
+      {status ? <div className="status-line">{status}</div> : null}
+    </section>
   );
 }
 

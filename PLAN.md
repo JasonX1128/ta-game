@@ -115,6 +115,8 @@ Confirmed rule:
    - Host submits final grades.
    - Server updates scores and used wagers.
    - Server records round history.
+   - Teams then see their grade and the official answer before the next round.
+   - Teams can submit a protest note for the host to review.
 
 6. **Next Round**
    - If rounds remain, return to round setup.
