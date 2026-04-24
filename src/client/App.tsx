@@ -1509,6 +1509,25 @@ function HostGrading({
       return partSuggestion.credit;
     }
 
+    if (parts.length > 1) {
+      return undefined;
+    }
+
+    if (typeof suggestion.credit === "number") {
+      return suggestion.credit;
+    }
+
+    return suggestion.grade === "correct" ? 1 : 0;
+  }
+
+  function suggestionCreditForTeam(suggestion: GradeSuggestion): number {
+    if (suggestion.partSuggestions?.length) {
+      const suggestedCredits = Object.fromEntries(
+        suggestion.partSuggestions.map((part) => [part.partId, part.credit])
+      );
+      return teamCredit(parts, suggestedCredits);
+    }
+
     if (typeof suggestion.credit === "number") {
       return suggestion.credit;
     }
@@ -1548,7 +1567,7 @@ function HostGrading({
 
         for (const part of parts) {
           const key = partGradeKey(suggestion.teamId, part.id);
-          if (touchedPartKeys.current.has(key) || teamCredits[part.id] !== undefined) {
+          if (touchedPartKeys.current.has(key)) {
             continue;
           }
 
@@ -1712,18 +1731,7 @@ function HostGrading({
               const suggestion = suggestionByTeam.get(team.id);
               const credits = partCredits[team.id] ?? {};
               const totalCredit = teamCredit(parts, credits);
-              const suggestedCredits = Object.fromEntries(
-                (suggestion?.partSuggestions ?? []).map((part) => [part.partId, part.credit])
-              );
-              const suggestionCredit = suggestion
-                ? typeof suggestion.credit === "number"
-                  ? suggestion.credit
-                  : suggestion.partSuggestions?.length
-                    ? teamCredit(parts, suggestedCredits)
-                    : suggestion.grade === "correct"
-                      ? 1
-                      : 0
-                : undefined;
+              const suggestionCredit = suggestion ? suggestionCreditForTeam(suggestion) : undefined;
               const partSuggestionById = new Map((suggestion?.partSuggestions ?? []).map((part) => [part.partId, part]));
               return (
                 <div className="grade-row" key={team.id}>

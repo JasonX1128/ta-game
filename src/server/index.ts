@@ -814,11 +814,12 @@ function parseJsonFromModelText(rawText: string): unknown {
   throw new Error("AI response did not include parseable JSON.");
 }
 
-function parseGemmaPartSuggestions(rawParts: unknown, validPartIds: Set<string>): PartGradeSuggestion[] {
+function parseGemmaPartSuggestions(rawParts: unknown, parts: QuestionPart[]): PartGradeSuggestion[] {
   if (!Array.isArray(rawParts)) {
     return [];
   }
 
+  const partById = new Map(parts.map((part) => [part.id, part]));
   return rawParts.flatMap((item) => {
     if (!item || typeof item !== "object") {
       return [];
@@ -826,14 +827,23 @@ function parseGemmaPartSuggestions(rawParts: unknown, validPartIds: Set<string>)
 
     const candidate = item as {
       partId?: unknown;
+      partNumber?: unknown;
       credit?: unknown;
       confidence?: unknown;
       rationale?: unknown;
       feedback?: unknown;
     };
-    const partId = typeof candidate.partId === "string" ? candidate.partId : "";
+    const rawPartId = typeof candidate.partId === "string" ? candidate.partId : "";
+    const partNumber = Number(candidate.partNumber);
+    const numberedPart = Number.isInteger(partNumber) && partNumber >= 1 ? parts[partNumber - 1] : undefined;
+    const matchedPart = partById.get(rawPartId);
+    if (matchedPart && numberedPart && numberedPart.id !== matchedPart.id) {
+      return [];
+    }
+
+    const partId = matchedPart?.id ?? numberedPart?.id ?? "";
     const credit = cleanCredit(candidate.credit);
-    if (!validPartIds.has(partId) || credit === undefined) {
+    if (!partById.has(partId) || credit === undefined) {
       return [];
     }
 
@@ -860,7 +870,6 @@ function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>, parts
     throw new Error("AI response did not include a suggestions array.");
   }
 
-  const validPartIds = new Set(parts.map((part) => part.id));
   const parsedSuggestions = suggestions.flatMap((item) => {
     if (!item || typeof item !== "object") {
       return [];
@@ -877,7 +886,7 @@ function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>, parts
     };
     const teamId = typeof candidate.teamId === "string" ? candidate.teamId : "";
     const grade = candidate.grade;
-    const partSuggestions = parseGemmaPartSuggestions(candidate.partSuggestions, validPartIds);
+    const partSuggestions = parseGemmaPartSuggestions(candidate.partSuggestions, parts);
     const credit = cleanCredit(candidate.credit) ?? (
       partSuggestions.length > 0
         ? roundPoints(parts.reduce((sum, part) => {
@@ -959,11 +968,16 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
     "Use the question, official answers, optional code blocks, and each team's student answer.",
     "Grade every question part with a decimal credit from 0 to 1.",
     "Use 1 for full credit, 0 for no credit, and a decimal for partial credit.",
+    "The question.parts array is authoritative. Return exactly one partSuggestion for every object in question.parts.",
+    "Copy each partSuggestion.partId exactly from the matching question part. Do not infer part order from labels alone.",
+    "Each partSuggestion rationale and feedback must discuss only that specific part's text and official answer.",
+    "If the student answer has multiple lines, map content to parts by meaning, not by line position alone.",
+    "Set top-level credit to the weighted sum of each part credit times that part's fraction.",
     "Set the overall grade to correct only when all parts receive full credit.",
     "Also write feedback for each team that will be shown directly to that team after grades are finalized.",
     "Student-facing feedback should be concise, constructive, and explain what was right or missing without mentioning internal confidence.",
     "Return only JSON matching this schema:",
-    '{"suggestions":[{"teamId":"string","grade":"correct|incorrect","credit":0.0,"confidence":0.0,"rationale":"short host-only explanation","feedback":"student-facing feedback","partSuggestions":[{"partId":"string","credit":0.0,"confidence":0.0,"rationale":"short explanation","feedback":"student-facing part feedback"}]}]}',
+    '{"suggestions":[{"teamId":"string","grade":"correct|incorrect","credit":0.0,"confidence":0.0,"rationale":"short host-only explanation","feedback":"student-facing feedback","partSuggestions":[{"partId":"exact partId from question.parts","partNumber":1,"credit":0.0,"confidence":0.0,"rationale":"short explanation for only this part","feedback":"student-facing feedback for only this part"}]}]}',
     "Do not include markdown or commentary outside JSON.",
     "",
     JSON.stringify({
@@ -973,7 +987,8 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
         codeLanguage: question?.codeLanguage ?? "",
         code: question?.code ?? "",
         officialAnswer: question?.answer ?? "",
-        parts: parts.map((part) => ({
+        parts: parts.map((part, index) => ({
+          partNumber: index + 1,
           partId: part.id,
           label: part.label ?? part.id,
           fraction: part.fraction,
@@ -1008,6 +1023,7 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
                 type: "object",
                 properties: {
                   partId: { type: "string" },
+                  partNumber: { type: "number" },
                   credit: { type: "number" },
                   confidence: { type: "number" },
                   rationale: { type: "string" },
