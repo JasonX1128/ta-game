@@ -728,6 +728,88 @@ function cleanCredit(value: unknown): number | undefined {
   return Math.max(0, Math.min(1, credit));
 }
 
+function extractBalancedJson(text: string, start: number): string | undefined {
+  const closingByOpening: Record<string, string> = {
+    "{": "}",
+    "[": "]"
+  };
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{" || char === "[") {
+      stack.push(closingByOpening[char]);
+      continue;
+    }
+
+    if (char === "}" || char === "]") {
+      if (stack.at(-1) !== char) {
+        return undefined;
+      }
+
+      stack.pop();
+      if (stack.length === 0) {
+        return text.slice(start, index + 1);
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function parseJsonFromModelText(rawText: string): unknown {
+  const trimmed = rawText.trim();
+  const unfenced = trimmed.startsWith("```")
+    ? trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim()
+    : trimmed;
+
+  for (const candidate of [trimmed, unfenced]) {
+    try {
+      return JSON.parse(candidate) as unknown;
+    } catch {
+      // Fall through to balanced extraction below.
+    }
+  }
+
+  for (let index = 0; index < rawText.length; index += 1) {
+    if (rawText[index] !== "{" && rawText[index] !== "[") {
+      continue;
+    }
+
+    const jsonText = extractBalancedJson(rawText, index);
+    if (!jsonText) {
+      continue;
+    }
+
+    try {
+      return JSON.parse(jsonText) as unknown;
+    } catch {
+      // Keep scanning in case this was an example or malformed preamble.
+    }
+  }
+
+  throw new Error("AI response did not include parseable JSON.");
+}
+
 function parseGemmaPartSuggestions(rawParts: unknown, validPartIds: Set<string>): PartGradeSuggestion[] {
   if (!Array.isArray(rawParts)) {
     return [];
@@ -762,18 +844,20 @@ function parseGemmaPartSuggestions(rawParts: unknown, validPartIds: Set<string>)
   });
 }
 
-function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>, validPartIds: Set<string>): GradeSuggestion[] {
-  const trimmed = rawText.trim();
-  const jsonText = trimmed.startsWith("```")
-    ? trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")
-    : trimmed;
-  const parsed = JSON.parse(jsonText) as unknown;
+function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>, parts: QuestionPart[]): GradeSuggestion[] {
+  const parsed = parseJsonFromModelText(rawText);
+  const suggestions = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === "object" && Array.isArray((parsed as { suggestions?: unknown }).suggestions)
+      ? (parsed as { suggestions: unknown[] }).suggestions
+      : undefined;
 
-  if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as { suggestions?: unknown }).suggestions)) {
+  if (!suggestions) {
     throw new Error("AI response did not include a suggestions array.");
   }
 
-  return (parsed as { suggestions: unknown[] }).suggestions.flatMap((item) => {
+  const validPartIds = new Set(parts.map((part) => part.id));
+  return suggestions.flatMap((item) => {
     if (!item || typeof item !== "object") {
       return [];
     }
@@ -792,7 +876,10 @@ function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>, valid
     const partSuggestions = parseGemmaPartSuggestions(candidate.partSuggestions, validPartIds);
     const credit = cleanCredit(candidate.credit) ?? (
       partSuggestions.length > 0
-        ? partSuggestions.reduce((sum, part) => sum + part.credit, 0) / partSuggestions.length
+        ? roundPoints(parts.reduce((sum, part) => {
+          const suggestion = partSuggestions.find((candidate) => candidate.partId === part.id);
+          return sum + part.fraction * (suggestion?.credit ?? 0);
+        }, 0))
         : undefined
     );
     const finalGrade = grade === "correct" || grade === "incorrect"
@@ -845,7 +932,6 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
     studentAnswer: team.currentAnswer ?? ""
   }));
   const validTeamIds = new Set(teams.map((team) => team.teamId));
-  const validPartIds = new Set(parts.map((part) => part.id));
   const prompt = [
     "You are helping a human host grade a classroom game.",
     "Use the question, official answers, optional code blocks, and each team's student answer.",
@@ -984,7 +1070,7 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
     throw new Error("Gemma response did not contain text.");
   }
 
-  return parseGemmaSuggestions(text, validTeamIds, validPartIds);
+  return parseGemmaSuggestions(text, validTeamIds, parts);
 }
 
 async function cachedGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSuggestion[]> {
