@@ -15,6 +15,7 @@ export type GradeSuggestion = {
   grade: Grade;
   confidence?: number;
   rationale?: string;
+  feedback?: string;
 };
 
 export type AnswerRevealMode = "host_only" | "after_grading" | "status_only";
@@ -48,6 +49,7 @@ export type TeamRoundResult = {
   grade: Grade;
   scoreDelta: number;
   bonusDelta: number;
+  aiFeedback?: string;
   protest?: {
     text: string;
     createdAt: number;

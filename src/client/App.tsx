@@ -302,6 +302,7 @@ function buildResultsCsv(room: PublicRoomState): string {
     `R${index + 1} Wager`,
     `R${index + 1} Grade`,
     `R${index + 1} Answer`,
+    `R${index + 1} Feedback`,
     `R${index + 1} Protest`
   ]).flat();
   const headers = [
@@ -346,7 +347,13 @@ function buildResultsCsv(room: PublicRoomState): string {
 
     const roundCells = Array.from({ length: maxRound }, (_item, index) => {
       const result = results[index];
-      return [result?.wager ?? "", result?.grade ?? "", result?.answer ?? "", result?.protest?.text ?? ""];
+      return [
+        result?.wager ?? "",
+        result?.grade ?? "",
+        result?.answer ?? "",
+        result?.aiFeedback ?? "",
+        result?.protest?.text ?? ""
+      ];
     }).flat();
 
     return [
@@ -1236,7 +1243,11 @@ function HostGrading({
   const suggestionByTeam = new Map(suggestions.map((suggestion) => [suggestion.teamId, suggestion]));
 
   async function submitGrades(): Promise<void> {
-    const response = await request("answer:grade", { ...hostPayload, grades });
+    const response = await request(
+      "answer:grade",
+      { ...hostPayload, grades },
+      room.settings.llmGradingEnabled ? 30000 : undefined
+    );
     if (!response.ok) {
       setStatus(response.message);
     }
@@ -1276,6 +1287,11 @@ function HostGrading({
                             : ""}
                           {suggestion.rationale ? ` - ${suggestion.rationale}` : ""}
                         </span>
+                      </div>
+                    ) : null}
+                    {suggestion?.feedback ? (
+                      <div className="suggestion-feedback">
+                        Student feedback: {suggestion.feedback}
                       </div>
                     ) : null}
                   </div>
@@ -1585,6 +1601,12 @@ function RoundHistoryPanel({ room }: { room: PublicRoomState }) {
                   <div className="history-delta">
                     Score +{formatPoints(result.scoreDelta)} · Bonus +{formatPoints(result.bonusDelta)}
                   </div>
+                  {result.aiFeedback ? (
+                    <div className="feedback-note">
+                      <strong>Feedback</strong>
+                      <span>{result.aiFeedback}</span>
+                    </div>
+                  ) : null}
                   {result.protest ? (
                     <div className="protest-note">
                       <strong>Protest</strong>
@@ -1703,6 +1725,12 @@ function TeamFinalizedGrade({
           Score +{formatPoints(result.scoreDelta)} · Bonus +{formatPoints(result.bonusDelta)}
         </div>
       </div>
+      {result.aiFeedback ? (
+        <div className="feedback-note">
+          <strong>Feedback</strong>
+          <span>{result.aiFeedback}</span>
+        </div>
+      ) : null}
       <form className="protest-form" onSubmit={submitProtest}>
         <label>
           Protest

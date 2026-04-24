@@ -212,13 +212,14 @@ function publicHistory(room: RoomRecord, context: SocketContext): RoundHistoryEn
       const isOwnTeam = result.teamId === context.teamId;
 
       if (room.settings.answerRevealMode === "after_grading" || isOwnTeam) {
-        return [result];
+        return [isOwnTeam ? result : { ...result, aiFeedback: undefined }];
       }
 
       if (room.settings.answerRevealMode === "status_only") {
         return [{
           ...result,
-          answer: undefined
+          answer: undefined,
+          aiFeedback: undefined
         }];
       }
 
@@ -577,7 +578,13 @@ function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>): Grad
       return [];
     }
 
-    const candidate = item as { teamId?: unknown; grade?: unknown; confidence?: unknown; rationale?: unknown };
+    const candidate = item as {
+      teamId?: unknown;
+      grade?: unknown;
+      confidence?: unknown;
+      rationale?: unknown;
+      feedback?: unknown;
+    };
     const teamId = typeof candidate.teamId === "string" ? candidate.teamId : "";
     const grade = candidate.grade;
     if (!validTeamIds.has(teamId) || (grade !== "correct" && grade !== "incorrect")) {
@@ -585,11 +592,18 @@ function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>): Grad
     }
 
     const confidence = Number(candidate.confidence);
+    const feedback = typeof candidate.feedback === "string"
+      ? candidate.feedback
+      : typeof candidate.rationale === "string"
+        ? candidate.rationale
+        : undefined;
+
     return [{
       teamId,
       grade,
       confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : undefined,
-      rationale: typeof candidate.rationale === "string" ? candidate.rationale.slice(0, 300) : undefined
+      rationale: typeof candidate.rationale === "string" ? candidate.rationale.slice(0, 300) : undefined,
+      feedback: feedback?.slice(0, 800)
     }];
   });
 }
@@ -616,8 +630,10 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
     "Use the question, official answer, optional code block, and each team's student answer.",
     "Suggest whether each answer should be marked correct or incorrect.",
     "Be conservative: mark correct only when the student answer substantially matches the official answer.",
+    "Also write feedback for each team that will be shown directly to that team after grades are finalized.",
+    "Student-facing feedback should be concise, constructive, and explain what was right or missing without mentioning internal confidence.",
     "Return only JSON matching this schema:",
-    '{"suggestions":[{"teamId":"string","grade":"correct|incorrect","confidence":0.0,"rationale":"short explanation"}]}',
+    '{"suggestions":[{"teamId":"string","grade":"correct|incorrect","confidence":0.0,"rationale":"short host-only explanation","feedback":"student-facing feedback"}]}',
     "Do not include markdown or commentary outside JSON.",
     "",
     JSON.stringify({
@@ -644,9 +660,10 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
             teamId: { type: "string" },
             grade: { type: "string", enum: ["correct", "incorrect"] },
             confidence: { type: "number" },
-            rationale: { type: "string" }
+            rationale: { type: "string" },
+            feedback: { type: "string" }
           },
-          required: ["teamId", "grade"]
+          required: ["teamId", "grade", "feedback"]
         }
       }
     },
@@ -737,6 +754,19 @@ async function cachedGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugge
   }
 }
 
+async function gradeSuggestionsForFinalResults(room: RoomRecord): Promise<Map<string, GradeSuggestion>> {
+  if (!room.settings.llmGradingEnabled) {
+    return new Map();
+  }
+
+  try {
+    const suggestions = await cachedGemmaGradeSuggestions(room);
+    return new Map(suggestions.map((suggestion) => [suggestion.teamId, suggestion]));
+  } catch {
+    return new Map();
+  }
+}
+
 function clearRoundTimer(room: RoomRecord): void {
   if (room.roundTimer) {
     clearTimeout(room.roundTimer);
@@ -749,6 +779,9 @@ function moveToGrading(room: RoomRecord): void {
   room.phase = "grading";
   room.roundEndsAt = Date.now();
   room.gradeSuggestionCache = undefined;
+  if (room.settings.llmGradingEnabled) {
+    void cachedGemmaGradeSuggestions(room).catch(() => undefined);
+  }
   touch(room);
 }
 
@@ -1257,7 +1290,7 @@ io.on("connection", (socket) => {
 
   socket.on(
     "answer:grade",
-    (
+    async (
       payload: { code?: unknown; hostToken?: unknown; grades?: Record<string, Grade> },
       ack?: AckCallback
     ) => {
@@ -1281,12 +1314,14 @@ io.on("connection", (socket) => {
       }
 
       const results: RoundHistoryEntry["results"] = [];
+      const gemmaSuggestions = await gradeSuggestionsForFinalResults(room);
 
       for (const team of room.teams) {
         const grade = grades[team.id];
         const wager = team.currentWager;
         const scoreDelta = grade === "correct" && wager !== undefined ? wager : 0;
         const bonusDelta = grade === "correct" ? room.settings.pointsPerCorrect : 0;
+        const aiFeedback = gemmaSuggestions.get(team.id)?.feedback?.trim();
 
         results.push({
           teamId: team.id,
@@ -1295,7 +1330,8 @@ io.on("connection", (socket) => {
           answer: team.currentAnswer,
           grade,
           scoreDelta,
-          bonusDelta
+          bonusDelta,
+          aiFeedback: aiFeedback || undefined
         });
 
         if (wager !== undefined) {
