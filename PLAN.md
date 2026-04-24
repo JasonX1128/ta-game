@@ -130,7 +130,8 @@ After game start, keep everything on one screen:
 
 - Right persistent sidebar:
   - Running leaderboard.
-  - Each team row shows rank, team name, wager score, bonus in parentheses, and total if needed.
+  - Each team row shows rank, team name, score, and bonus points.
+  - Compact rules reference remains visible without taking over the page.
 
 ### Team View
 

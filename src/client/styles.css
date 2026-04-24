@@ -118,6 +118,7 @@ button {
 .waiting-panel,
 .game-main,
 .leaderboard,
+.rules-panel,
 .flow-panel {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -131,6 +132,7 @@ button {
 .waiting-panel,
 .game-main,
 .leaderboard,
+.rules-panel,
 .flow-panel {
   padding: 18px;
 }
@@ -138,6 +140,12 @@ button {
 .lobby-main {
   display: grid;
   gap: 18px;
+}
+
+.lobby-side,
+.side-stack {
+  display: grid;
+  gap: 12px;
 }
 
 .panel-title {
@@ -631,7 +639,7 @@ h2 {
   color: white;
 }
 
-.leaderboard {
+.side-stack {
   position: sticky;
   top: 18px;
 }
@@ -690,6 +698,49 @@ h2 {
   font-size: 0.78rem;
 }
 
+.rules-panel {
+  box-shadow: none;
+  padding: 14px;
+}
+
+.rules-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 900;
+  margin-bottom: 10px;
+}
+
+.rule-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.rule-grid div {
+  min-height: 62px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px;
+  background: #fbfaf5;
+}
+
+.rule-grid strong,
+.rule-grid span {
+  display: block;
+}
+
+.rule-grid strong {
+  font-size: 0.78rem;
+}
+
+.rule-grid span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.25;
+  margin-top: 3px;
+}
+
 .empty-state {
   color: var(--muted);
   border: 1px dashed #cbd3ce;
@@ -710,7 +761,7 @@ h2 {
     grid-template-columns: 1fr;
   }
 
-  .leaderboard {
+  .side-stack {
     position: static;
   }
 
@@ -748,6 +799,7 @@ h2 {
   .waiting-panel,
   .game-main,
   .leaderboard,
+  .rules-panel,
   .flow-panel {
     padding: 14px;
   }
@@ -772,5 +824,9 @@ h2 {
 
   .leader-stat {
     justify-items: start;
+  }
+
+  .rule-grid {
+    grid-template-columns: 1fr;
   }
 }

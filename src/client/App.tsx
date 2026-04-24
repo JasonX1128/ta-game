@@ -2,6 +2,7 @@ import {
   Check,
   Clipboard,
   DoorOpen,
+  Info,
   LogIn,
   Play,
   Plus,
@@ -678,6 +679,7 @@ function HostLobby({
           Teams
         </div>
         <TeamList teams={room.teams} />
+        <RulesPanel />
       </aside>
     </section>
   );
@@ -698,6 +700,7 @@ function TeamLobby({ room, team }: { room: PublicRoomState; team: PublicTeam }) 
         Teams
       </div>
       <TeamList teams={room.teams} />
+      <RulesPanel />
     </section>
   );
 }
@@ -717,7 +720,10 @@ function GameFrame({ room, children }: { room: PublicRoomState; children: React.
         </div>
         {children}
       </div>
-      <Leaderboard room={room} />
+      <aside className="side-stack">
+        <Leaderboard room={room} />
+        <RulesPanel />
+      </aside>
     </section>
   );
 }
@@ -1180,7 +1186,7 @@ function AnswerTable({ teams }: { teams: PublicTeam[] }) {
 
 function Leaderboard({ room }: { room: PublicRoomState }) {
   return (
-    <aside className="leaderboard">
+    <section className="leaderboard">
       <div className="panel-title">
         <Trophy size={20} />
         Leaderboard
@@ -1212,7 +1218,36 @@ function Leaderboard({ room }: { room: PublicRoomState }) {
         <span>Score is the sum of correct wagers.</span>
         <span>Bonus points are correct-answer points plus rank bonus.</span>
       </div>
-    </aside>
+    </section>
+  );
+}
+
+function RulesPanel() {
+  return (
+    <section className="rules-panel">
+      <div className="rules-title">
+        <Info size={17} />
+        Rules
+      </div>
+      <div className="rule-grid">
+        <div>
+          <strong>Wager</strong>
+          <span>Pick one unused value from 1-N.</span>
+        </div>
+        <div>
+          <strong>Correct</strong>
+          <span>Adds wager to score.</span>
+        </div>
+        <div>
+          <strong>Incorrect</strong>
+          <span>Scores 0 and spends the wager.</span>
+        </div>
+        <div>
+          <strong>Bonus</strong>
+          <span>Correct-answer points plus rank bonus.</span>
+        </div>
+      </div>
+    </section>
   );
 }
 
