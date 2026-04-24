@@ -10,6 +10,13 @@ export type Role = "host" | "team";
 
 export type Grade = "correct" | "incorrect";
 
+export type GradeSuggestion = {
+  teamId: string;
+  grade: Grade;
+  confidence?: number;
+  rationale?: string;
+};
+
 export type AnswerRevealMode = "host_only" | "after_grading" | "status_only";
 
 export type GameSettings = {

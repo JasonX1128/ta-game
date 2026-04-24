@@ -27,7 +27,7 @@ Rules:
 - `code` is optional.
 - `codeLanguage` is optional and displayed as a small label above the code block.
 - `minutes` is optional and auto-fills the host timer for that question.
-- `answer` is optional and is shown to participants only after grades are finalized.
+- `answer` is optional and is shown to participants only after grades are finalized. When present, it is also sent to Gemma with the question and student answers for host-only grade suggestions.
 - `image` is optional.
 - If using images, upload a folder that contains `questions.json` and the image files.
 - Images can be referenced by filename in `image`, or auto-matched by question number with names like `q1.png`, `1.jpg`, `question1.webp`, or `question-1.png`.

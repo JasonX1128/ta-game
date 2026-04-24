@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import { createServer } from "node:http";
 import path from "node:path";
@@ -10,6 +11,7 @@ import {
   type AnswerRevealMode,
   type GameSettings,
   type Grade,
+  type GradeSuggestion,
   type LeaderboardEntry,
   type Question,
   type PublicRoomState,
@@ -54,6 +56,11 @@ type RoomRecord = {
   roundDurationSeconds?: number;
   roundEndsAt?: number;
   roundTimer?: NodeJS.Timeout;
+  gradeSuggestionCache?: {
+    round: number;
+    promise?: Promise<GradeSuggestion[]>;
+    suggestions?: GradeSuggestion[];
+  };
   history: RoundHistoryEntry[];
   adjustments: ScoreAdjustment[];
   createdAt: number;
@@ -506,6 +513,210 @@ function validateSettings(settings: Partial<GameSettings>): GameSettings | strin
   };
 }
 
+function extractGemmaText(response: unknown): string | undefined {
+  if (!response || typeof response !== "object") {
+    return undefined;
+  }
+
+  const candidates = (response as { candidates?: unknown }).candidates;
+  if (!Array.isArray(candidates)) {
+    return undefined;
+  }
+
+  return candidates
+    .flatMap((candidate) => {
+      if (!candidate || typeof candidate !== "object") {
+        return [];
+      }
+
+      const parts = (candidate as { content?: { parts?: unknown } }).content?.parts;
+      if (!Array.isArray(parts)) {
+        return [];
+      }
+
+      return parts
+        .map((part) => (part && typeof part === "object" ? (part as { text?: unknown }).text : undefined))
+        .filter((text): text is string => typeof text === "string");
+    })
+    .join("\n");
+}
+
+function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>): GradeSuggestion[] {
+  const trimmed = rawText.trim();
+  const jsonText = trimmed.startsWith("```")
+    ? trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")
+    : trimmed;
+  const parsed = JSON.parse(jsonText) as unknown;
+
+  if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as { suggestions?: unknown }).suggestions)) {
+    throw new Error("AI response did not include a suggestions array.");
+  }
+
+  return (parsed as { suggestions: unknown[] }).suggestions.flatMap((item) => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+
+    const candidate = item as { teamId?: unknown; grade?: unknown; confidence?: unknown; rationale?: unknown };
+    const teamId = typeof candidate.teamId === "string" ? candidate.teamId : "";
+    const grade = candidate.grade;
+    if (!validTeamIds.has(teamId) || (grade !== "correct" && grade !== "incorrect")) {
+      return [];
+    }
+
+    const confidence = Number(candidate.confidence);
+    return [{
+      teamId,
+      grade,
+      confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : undefined,
+      rationale: typeof candidate.rationale === "string" ? candidate.rationale.slice(0, 300) : undefined
+    }];
+  });
+}
+
+async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSuggestion[]> {
+  const apiKey = process.env.GEMMA_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMMA_API_KEY is not configured.");
+  }
+
+  const model = process.env.GEMMA_MODEL || "gemma-4-26b-a4b-it";
+  const apiBase = process.env.GEMMA_API_BASE || "https://generativelanguage.googleapis.com/v1beta";
+  const modelPath = model.startsWith("models/") ? model : `models/${model}`;
+  const question = room.settings.questions[room.currentRound - 1];
+  const teams = room.teams.map((team) => ({
+    teamId: team.id,
+    teamName: team.name,
+    wager: team.currentWager ?? null,
+    studentAnswer: team.currentAnswer ?? ""
+  }));
+  const validTeamIds = new Set(teams.map((team) => team.teamId));
+  const prompt = [
+    "You are helping a human host grade a classroom game.",
+    "Use the question, official answer, optional code block, and each team's student answer.",
+    "Suggest whether each answer should be marked correct or incorrect.",
+    "Be conservative: mark correct only when the student answer substantially matches the official answer.",
+    "Return only JSON matching this schema:",
+    '{"suggestions":[{"teamId":"string","grade":"correct|incorrect","confidence":0.0,"rationale":"short explanation"}]}',
+    "Do not include markdown or commentary outside JSON.",
+    "",
+    JSON.stringify({
+      round: room.currentRound,
+      question: {
+        text: question?.text ?? "",
+        codeLanguage: question?.codeLanguage ?? "",
+        code: question?.code ?? "",
+        officialAnswer: question?.answer ?? ""
+      },
+      teams
+    })
+  ].join("\n");
+
+  const url = `${apiBase.replace(/\/$/, "")}/${modelPath}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const responseSchema = {
+    type: "object",
+    properties: {
+      suggestions: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            teamId: { type: "string" },
+            grade: { type: "string", enum: ["correct", "incorrect"] },
+            confidence: { type: "number" },
+            rationale: { type: "string" }
+          },
+          required: ["teamId", "grade"]
+        }
+      }
+    },
+    required: ["suggestions"]
+  };
+
+  async function postGemma(includeSchema: boolean): Promise<{ ok: true; data: unknown } | { ok: false; status: number; text: string }> {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: prompt }]
+          }
+        ],
+        generationConfig: {
+          temperature: 0,
+          responseMimeType: "application/json",
+          ...(includeSchema ? { responseJsonSchema: responseSchema } : {})
+        }
+      })
+    });
+
+    const text = await response.text();
+    if (!response.ok) {
+      return { ok: false, status: response.status, text };
+    }
+
+    try {
+      return { ok: true, data: JSON.parse(text) as unknown };
+    } catch {
+      throw new Error("Gemma response was not valid JSON.");
+    }
+  }
+
+  let result = await postGemma(true);
+  if (
+    !result.ok &&
+    result.status === 400 &&
+    /schema|responseJsonSchema|unsupported|unknown field|invalid/i.test(result.text)
+  ) {
+    result = await postGemma(false);
+  }
+
+  if (!result.ok) {
+    throw new Error(`Gemma request failed (${result.status}): ${result.text.slice(0, 300)}`);
+  }
+
+  const text = extractGemmaText(result.data);
+  if (!text) {
+    throw new Error("Gemma response did not contain text.");
+  }
+
+  return parseGemmaSuggestions(text, validTeamIds);
+}
+
+async function cachedGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSuggestion[]> {
+  const cached = room.gradeSuggestionCache;
+  if (cached?.round === room.currentRound) {
+    if (cached.suggestions) {
+      return cached.suggestions;
+    }
+
+    if (cached.promise) {
+      return cached.promise;
+    }
+  }
+
+  const round = room.currentRound;
+  const promise = requestGemmaGradeSuggestions(room);
+  room.gradeSuggestionCache = { round, promise };
+
+  try {
+    const suggestions = await promise;
+    if (room.gradeSuggestionCache?.round === round && room.currentRound === round) {
+      room.gradeSuggestionCache = { round, suggestions };
+    }
+    return suggestions;
+  } catch (error) {
+    if (room.gradeSuggestionCache?.round === round && room.gradeSuggestionCache.promise === promise) {
+      room.gradeSuggestionCache = undefined;
+    }
+    throw error;
+  }
+}
+
 function clearRoundTimer(room: RoomRecord): void {
   if (room.roundTimer) {
     clearTimeout(room.roundTimer);
@@ -517,6 +728,7 @@ function moveToGrading(room: RoomRecord): void {
   clearRoundTimer(room);
   room.phase = "grading";
   room.roundEndsAt = Date.now();
+  room.gradeSuggestionCache = undefined;
   touch(room);
 }
 
@@ -568,6 +780,7 @@ function resetGame(room: RoomRecord): void {
 
   room.history = [];
   room.adjustments = [];
+  room.gradeSuggestionCache = undefined;
 
   touch(room);
 }
@@ -763,6 +976,7 @@ io.on("connection", (socket) => {
 
     room.history = [];
     room.adjustments = [];
+    room.gradeSuggestionCache = undefined;
     room.currentRound = 1;
     room.phase = "round_setup";
     room.roundDurationSeconds = undefined;
@@ -981,6 +1195,28 @@ io.on("connection", (socket) => {
   );
 
   socket.on(
+    "grading:suggest",
+    async (payload: { code?: unknown; hostToken?: unknown }, ack?: AckCallback<{ suggestions: GradeSuggestion[] }>) => {
+      const room = requireHost(socket, ack, payload);
+      if (!room) {
+        return;
+      }
+
+      if (room.phase !== "grading") {
+        fail(socket, ack, "AI suggestions are available while grading answers.");
+        return;
+      }
+
+      try {
+        const suggestions = await cachedGemmaGradeSuggestions(room);
+        ok(ack, { suggestions });
+      } catch (error) {
+        fail(socket, ack, error instanceof Error ? error.message : "Could not get AI grade suggestions.");
+      }
+    }
+  );
+
+  socket.on(
     "answer:grade",
     (
       payload: { code?: unknown; hostToken?: unknown; grades?: Record<string, Grade> },
@@ -1110,6 +1346,7 @@ io.on("connection", (socket) => {
 
     room.currentRound += 1;
     room.phase = "round_setup";
+    room.gradeSuggestionCache = undefined;
     resetCurrentRoundFields(room);
     touch(room);
     ok(ack, {});

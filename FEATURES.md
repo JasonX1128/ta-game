@@ -59,6 +59,14 @@ This reduces accidental mis-clicks and gives the host one last chance to adjust 
 
 Status: implemented as a review step before finalizing grades.
 
+### Gemma Grade Suggestions
+
+While the host is grading, send the question, official answer, and each student answer to Gemma for structured correct/incorrect suggestions.
+
+The suggestions prefill only untouched grade buttons, never finalize grades, and never overwrite a host choice made before the AI response returns.
+
+Status: implemented as a host-only grading aid.
+
 ### Answer Reveal Mode
 
 Add a setting for whether teams can see other teams' answers after grading:

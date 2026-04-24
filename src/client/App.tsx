@@ -13,19 +13,21 @@ import {
   RotateCcw,
   Send,
   Settings as SettingsIcon,
+  Sparkles,
   Timer,
   Trash2,
   Trophy,
   Users,
   X
 } from "lucide-react";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import type {
   Ack,
   AnswerRevealMode,
   GameSettings,
   Grade,
+  GradeSuggestion,
   PublicRoomState,
   PublicTeam,
   Question,
@@ -42,7 +44,11 @@ type SavedSession = {
   teamName?: string;
 };
 
-type RequestFn = <T extends object = Record<string, never>>(event: string, payload: unknown) => Promise<Ack<T>>;
+type RequestFn = <T extends object = Record<string, never>>(
+  event: string,
+  payload: unknown,
+  timeoutMs?: number
+) => Promise<Ack<T>>;
 
 const SESSION_KEY = "ta-game-session";
 const SOCKET_URL =
@@ -379,9 +385,9 @@ export default function App() {
     setSessionState(next);
   }
 
-  const request: RequestFn = (event, payload) =>
+  const request: RequestFn = (event, payload, timeoutMs = 5000) =>
     new Promise((resolve) => {
-      socket.timeout(5000).emit(event, payload, (err: Error | null, response: Ack) => {
+      socket.timeout(timeoutMs).emit(event, payload, (err: Error | null, response: Ack) => {
         if (err) {
           resolve({ ok: false, message: "The server did not respond." });
           return;
@@ -1094,6 +1100,66 @@ function HostGrading({
   const [grades, setGrades] = useState<Record<string, Grade>>({});
   const [reviewing, setReviewing] = useState(false);
   const [status, setStatus] = useState("");
+  const [suggestions, setSuggestions] = useState<GradeSuggestion[]>([]);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestionStatus, setSuggestionStatus] = useState("");
+  const [suggestionTone, setSuggestionTone] = useState<"info" | "error">("info");
+  const touchedGradeIds = useRef<Set<string>>(new Set());
+  const suggestionRequestId = useRef(0);
+  const autoSuggestionKey = useRef("");
+
+  function applySuggestionGrades(nextSuggestions: GradeSuggestion[]): void {
+    setGrades((current) => {
+      let changed = false;
+      const next = { ...current };
+
+      for (const suggestion of nextSuggestions) {
+        if (touchedGradeIds.current.has(suggestion.teamId) || next[suggestion.teamId] !== undefined) {
+          continue;
+        }
+
+        next[suggestion.teamId] = suggestion.grade;
+        changed = true;
+      }
+
+      return changed ? next : current;
+    });
+  }
+
+  async function requestSuggestions(manual = false): Promise<void> {
+    const requestId = suggestionRequestId.current + 1;
+    suggestionRequestId.current = requestId;
+    setSuggesting(true);
+    setSuggestionTone("info");
+    setSuggestionStatus(manual ? "Asking Gemma again..." : "Asking Gemma for suggestions...");
+
+    const round = room.currentRound;
+    const response = await request<{ suggestions: GradeSuggestion[] }>("grading:suggest", hostPayload, 30000);
+    if (suggestionRequestId.current !== requestId || room.currentRound !== round) {
+      return;
+    }
+
+    setSuggesting(false);
+    if (!response.ok) {
+      setSuggestionTone("error");
+      setSuggestionStatus(response.message);
+      return;
+    }
+
+    setSuggestions(response.suggestions);
+    applySuggestionGrades(response.suggestions);
+    setSuggestionTone("info");
+    setSuggestionStatus(
+      response.suggestions.length > 0
+        ? "Gemma suggestions loaded for unchecked teams."
+        : "Gemma did not return grade suggestions."
+    );
+  }
+
+  function markGrade(teamId: string, grade: Grade): void {
+    touchedGradeIds.current.add(teamId);
+    setGrades((current) => ({ ...current, [teamId]: grade }));
+  }
 
   useEffect(() => {
     const defaults: Record<string, Grade> = {};
@@ -1102,11 +1168,29 @@ function HostGrading({
         defaults[team.id] = "incorrect";
       }
     }
+    touchedGradeIds.current = new Set(Object.keys(defaults));
+    suggestionRequestId.current += 1;
+    autoSuggestionKey.current = "";
     setGrades(defaults);
+    setSuggestions([]);
+    setSuggestionStatus("");
+    setSuggestionTone("info");
+    setSuggesting(false);
     setReviewing(false);
   }, [room.currentRound]);
 
+  useEffect(() => {
+    const key = `${room.code}:${room.currentRound}`;
+    if (autoSuggestionKey.current === key) {
+      return;
+    }
+
+    autoSuggestionKey.current = key;
+    void requestSuggestions();
+  }, [room.code, room.currentRound]);
+
   const ready = room.teams.every((team) => grades[team.id] === "correct" || grades[team.id] === "incorrect");
+  const suggestionByTeam = new Map(suggestions.map((suggestion) => [suggestion.teamId, suggestion]));
 
   async function submitGrades(): Promise<void> {
     const response = await request("answer:grade", { ...hostPayload, grades });
@@ -1122,32 +1206,57 @@ function HostGrading({
         <GradeReview room={room} grades={grades} onEdit={() => setReviewing(false)} onSubmit={submitGrades} />
       ) : (
         <>
-          <div className="answer-list">
-            {room.teams.map((team) => (
-              <div className="grade-row" key={team.id}>
-                <div>
-                  <div className="team-name">{team.name}</div>
-                  <div className="answer-text">{team.currentAnswer || "No answer submitted"}</div>
-                </div>
-                <div className="grade-actions">
-                  <button
-                    className={grades[team.id] === "correct" ? "grade correct selected" : "grade correct"}
-                    title="Mark correct"
-                    onClick={() => setGrades((current) => ({ ...current, [team.id]: "correct" }))}
-                  >
-                    <Check size={18} />
-                  </button>
-                  <button
-                    className={grades[team.id] === "incorrect" ? "grade incorrect selected" : "grade incorrect"}
-                    title="Mark incorrect"
-                    onClick={() => setGrades((current) => ({ ...current, [team.id]: "incorrect" }))}
-                  >
-                    <X size={18} />
-                  </button>
-                </div>
-              </div>
-            ))}
+          <div className="grading-toolbar">
+            <div className="eyebrow">Host Grading</div>
+            <button className="secondary" disabled={suggesting} onClick={() => requestSuggestions(true)}>
+              <Sparkles size={18} />
+              {suggesting ? "Suggesting" : "Suggest Grades"}
+            </button>
           </div>
+          <div className="answer-list">
+            {room.teams.map((team) => {
+              const suggestion = suggestionByTeam.get(team.id);
+              return (
+                <div className="grade-row" key={team.id}>
+                  <div>
+                    <div className="team-name">{team.name}</div>
+                    <div className="answer-text">{team.currentAnswer || "No answer submitted"}</div>
+                    {suggestion ? (
+                      <div className="suggestion-note">
+                        <Sparkles size={14} />
+                        <span>
+                          Gemma: <strong>{suggestion.grade === "correct" ? "Correct" : "Incorrect"}</strong>
+                          {typeof suggestion.confidence === "number"
+                            ? ` (${Math.round(suggestion.confidence * 100)}%)`
+                            : ""}
+                          {suggestion.rationale ? ` - ${suggestion.rationale}` : ""}
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="grade-actions">
+                    <button
+                      className={grades[team.id] === "correct" ? "grade correct selected" : "grade correct"}
+                      title="Mark correct"
+                      aria-pressed={grades[team.id] === "correct"}
+                      onClick={() => markGrade(team.id, "correct")}
+                    >
+                      <Check size={18} />
+                    </button>
+                    <button
+                      className={grades[team.id] === "incorrect" ? "grade incorrect selected" : "grade incorrect"}
+                      title="Mark incorrect"
+                      aria-pressed={grades[team.id] === "incorrect"}
+                      onClick={() => markGrade(team.id, "incorrect")}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {suggestionStatus ? <div className={`status-line ${suggestionTone}`}>{suggestionStatus}</div> : null}
           <button className="primary submit-row" disabled={!ready} onClick={() => setReviewing(true)}>
             <Check size={18} />
             Review Grades

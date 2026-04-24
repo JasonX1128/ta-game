@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit"
   },
   "dependencies": {
+    "dotenv": "^17.4.2",
     "express": "^5.1.0",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
@@ -22,11 +23,11 @@
     "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "4.3.4",
     "@types/express": "^5.0.3",
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "4.3.4",
     "concurrently": "^9.1.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
