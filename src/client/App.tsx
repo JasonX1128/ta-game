@@ -1587,6 +1587,7 @@ function HostGrading({
   const [suggestionStatus, setSuggestionStatus] = useState("");
   const [suggestionTone, setSuggestionTone] = useState<"info" | "error">("info");
   const [gemmaDebugBatches, setGemmaDebugBatches] = useState<GemmaDebugBatch[]>([]);
+  const [copiedDebugKey, setCopiedDebugKey] = useState("");
   const touchedPartKeys = useRef<Set<string>>(new Set());
   const suggestionRequestId = useRef(0);
   const autoSuggestionKey = useRef("");
@@ -1741,6 +1742,19 @@ function HostGrading({
     }));
   }
 
+  async function copyDebugText(key: string, text: string): Promise<void> {
+    try {
+      await navigator.clipboard?.writeText(text);
+      setCopiedDebugKey(key);
+      window.setTimeout(() => {
+        setCopiedDebugKey((current) => (current === key ? "" : current));
+      }, 1500);
+    } catch {
+      setSuggestionTone("error");
+      setSuggestionStatus("Could not copy the Gemma debug block.");
+    }
+  }
+
   useEffect(() => {
     const defaults: Record<string, Partial<Record<string, number>>> = {};
     const touched = new Set<string>();
@@ -1761,6 +1775,7 @@ function HostGrading({
     setSuggestionTone("info");
     setSuggesting(false);
     setGemmaDebugBatches([]);
+    setCopiedDebugKey("");
     setReviewing(false);
   }, [room.currentRound, partSignature]);
 
@@ -1922,25 +1937,27 @@ function HostGrading({
                     <div className="question-label">
                       Batch {batch.batchIndex} of {batch.batchCount} · teams {batch.teamIds.join(", ")}
                     </div>
-                    <div className="question-label">Prompt</div>
-                    <pre className="question-code debug-code">
-                      <code>{batch.prompt}</code>
-                    </pre>
+                    <DebugTextBlock
+                      label="Prompt"
+                      value={batch.prompt}
+                      copied={copiedDebugKey === `prompt-${batch.batchIndex}`}
+                      onCopy={() => copyDebugText(`prompt-${batch.batchIndex}`, batch.prompt)}
+                    />
                     {batch.modelText ? (
-                      <>
-                        <div className="question-label">Model Text</div>
-                        <pre className="question-code debug-code">
-                          <code>{batch.modelText}</code>
-                        </pre>
-                      </>
+                      <DebugTextBlock
+                        label="Model Text"
+                        value={batch.modelText}
+                        copied={copiedDebugKey === `model-${batch.batchIndex}`}
+                        onCopy={() => copyDebugText(`model-${batch.batchIndex}`, batch.modelText ?? "")}
+                      />
                     ) : null}
                     {batch.rawResponse ? (
-                      <>
-                        <div className="question-label">Raw Response</div>
-                        <pre className="question-code debug-code">
-                          <code>{batch.rawResponse}</code>
-                        </pre>
-                      </>
+                      <DebugTextBlock
+                        label="Raw Response"
+                        value={batch.rawResponse}
+                        copied={copiedDebugKey === `raw-${batch.batchIndex}`}
+                        onCopy={() => copyDebugText(`raw-${batch.batchIndex}`, batch.rawResponse ?? "")}
+                      />
                     ) : null}
                   </section>
                 ))}
@@ -1954,6 +1971,33 @@ function HostGrading({
         </>
       )}
       {status ? <div className="status-line">{status}</div> : null}
+    </div>
+  );
+}
+
+function DebugTextBlock({
+  label,
+  value,
+  copied,
+  onCopy
+}: {
+  label: string;
+  value: string;
+  copied: boolean;
+  onCopy: () => void;
+}) {
+  return (
+    <div className="debug-text-block">
+      <div className="question-label">{label}</div>
+      <div className="debug-code-wrap">
+        <button className="debug-copy-button" type="button" onClick={onCopy}>
+          <Clipboard size={14} />
+          {copied ? "Copied" : "Copy"}
+        </button>
+        <pre className="question-code debug-code">
+          <code>{value}</code>
+        </pre>
+      </div>
     </div>
   );
 }

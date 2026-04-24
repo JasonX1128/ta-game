@@ -657,6 +657,40 @@ h2 {
   min-width: max-content;
 }
 
+.debug-text-block {
+  margin-top: 10px;
+  min-width: 0;
+}
+
+.debug-code-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.debug-copy-button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(217, 222, 216, 0.9);
+  border-radius: 999px;
+  background: rgba(255, 253, 248, 0.82);
+  color: #294766;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 4px 12px rgba(21, 32, 43, 0.12);
+  opacity: 0.82;
+}
+
+.debug-copy-button:hover,
+.debug-copy-button:focus-visible {
+  opacity: 1;
+}
+
 .question-code-wrap {
   margin-top: 12px;
 }
