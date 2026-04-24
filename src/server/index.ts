@@ -818,6 +818,16 @@ function updateRoundResultGrade(room: RoomRecord, team: TeamRecord, result: Roun
   team.answerPoints += nextBonusDelta - previousBonusDelta;
 }
 
+function lowestAvailableWager(room: RoomRecord, team: TeamRecord): number | undefined {
+  for (let value = 1; value <= room.settings.questionCount; value += 1) {
+    if (!team.usedWagers.has(value)) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
 function clearRoundTimer(room: RoomRecord): void {
   if (room.roundTimer) {
     clearTimeout(room.roundTimer);
@@ -1205,7 +1215,7 @@ io.on("connection", (socket) => {
   socket.on(
     "round:startAnswering",
     (
-      payload: { code?: unknown; hostToken?: unknown; durationMinutes?: unknown },
+      payload: { code?: unknown; hostToken?: unknown; durationMinutes?: unknown; forceMissingWagers?: unknown },
       ack?: AckCallback
     ) => {
       const room = requireHost(socket, ack, payload);
@@ -1218,7 +1228,8 @@ io.on("connection", (socket) => {
         return;
       }
 
-      if (room.teams.some((team) => team.currentWager === undefined)) {
+      const missingWagerTeams = room.teams.filter((team) => team.currentWager === undefined);
+      if (missingWagerTeams.length > 0 && payload.forceMissingWagers !== true) {
         fail(socket, ack, "Every team must lock a wager first.");
         return;
       }
@@ -1227,6 +1238,16 @@ io.on("connection", (socket) => {
       if (!Number.isFinite(durationMinutes) || durationMinutes <= 0 || durationMinutes > 180) {
         fail(socket, ack, "Timer must be greater than 0 and no more than 180 minutes.");
         return;
+      }
+
+      for (const team of missingWagerTeams) {
+        const forcedWager = lowestAvailableWager(room, team);
+        if (forcedWager === undefined) {
+          fail(socket, ack, `${team.name} has no available wagers left.`);
+          return;
+        }
+
+        team.currentWager = forcedWager;
       }
 
       const durationSeconds = Math.max(1, Math.round(durationMinutes * 60));

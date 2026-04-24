@@ -1127,19 +1127,38 @@ function HostRoundSetup({
   const questionMinutes = currentQuestion(room)?.minutes;
   const [minutes, setMinutes] = useState(String(questionMinutes ?? 2));
   const [status, setStatus] = useState("");
-  const allLocked = room.teams.length > 0 && room.teams.every((team) => team.wagerLocked);
+  const missingWagerTeams = room.teams.filter((team) => !team.wagerLocked);
+  const allLocked = room.teams.length > 0 && missingWagerTeams.length === 0;
 
   useEffect(() => {
     setMinutes(String(questionMinutes ?? 2));
   }, [room.currentRound, questionMinutes]);
 
-  async function startAnswers(): Promise<void> {
+  async function startAnswers(forceMissingWagers = false): Promise<void> {
     const response = await request("round:startAnswering", {
       ...hostPayload,
-      durationMinutes: Number(minutes)
+      durationMinutes: Number(minutes),
+      forceMissingWagers
     });
     if (!response.ok) {
       setStatus(response.message);
+    }
+  }
+
+  async function handleStartTimer(): Promise<void> {
+    if (missingWagerTeams.length === 0) {
+      await startAnswers();
+      return;
+    }
+
+    const names = missingWagerTeams.map((team) => team.name).join(", ");
+    const confirmed = window.confirm(
+      `Start anyway? ${names} ${missingWagerTeams.length === 1 ? "has" : "have"} not submitted a wager. ` +
+        "They will be assigned their lowest available wager."
+    );
+
+    if (confirmed) {
+      await startAnswers(true);
     }
   }
 
@@ -1157,11 +1176,16 @@ function HostRoundSetup({
             onChange={(event) => setMinutes(event.target.value)}
           />
         </label>
-        <button className="primary" disabled={!allLocked} onClick={startAnswers}>
+        <button className="primary" disabled={room.teams.length === 0} onClick={handleStartTimer}>
           <Timer size={18} />
-          Start Timer
+          {allLocked ? "Start Timer" : "Start Timer Anyway"}
         </button>
       </div>
+      {!allLocked ? (
+        <div className="status-line info">
+          Missing wagers will be auto-filled with each team's lowest available wager if you confirm.
+        </div>
+      ) : null}
       <TeamRoundTable teams={room.teams} />
       {status ? <div className="status-line">{status}</div> : null}
     </div>
