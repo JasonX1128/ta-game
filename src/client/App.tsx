@@ -1,7 +1,11 @@
 import {
   Check,
   Clipboard,
+  Download,
   DoorOpen,
+  Eye,
+  EyeOff,
+  History,
   Info,
   LogIn,
   Play,
@@ -10,13 +14,24 @@ import {
   Send,
   Settings as SettingsIcon,
   Timer,
+  Trash2,
   Trophy,
   Users,
   X
 } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { io, Socket } from "socket.io-client";
-import type { Ack, GameSettings, Grade, PublicRoomState, PublicTeam, Question, Role } from "../shared/types";
+import type {
+  Ack,
+  AnswerRevealMode,
+  GameSettings,
+  Grade,
+  PublicRoomState,
+  PublicTeam,
+  Question,
+  Role,
+  RoundHistoryEntry
+} from "../shared/types";
 
 type SavedSession = {
   code: string;
@@ -175,6 +190,7 @@ async function parseQuestionUpload(fileList: FileList | null): Promise<Question[
       code?: unknown;
       codeLanguage?: unknown;
       language?: unknown;
+      minutes?: unknown;
       image?: unknown;
       imageName?: unknown;
       imageAlt?: unknown;
@@ -193,9 +209,14 @@ async function parseQuestionUpload(fileList: FileList | null): Promise<Question[
         : typeof candidate.imageName === "string"
           ? candidate.imageName
           : undefined;
+    const minutes = candidate.minutes === undefined ? undefined : Number(candidate.minutes);
 
     if (!text) {
       throw new Error(`Question ${index + 1} needs text.`);
+    }
+
+    if (minutes !== undefined && (!Number.isFinite(minutes) || minutes <= 0 || minutes > 180)) {
+      throw new Error(`Question ${index + 1} minutes must be greater than 0 and no more than 180.`);
     }
 
     let imageFile: File | undefined;
@@ -222,6 +243,7 @@ async function parseQuestionUpload(fileList: FileList | null): Promise<Question[
       text,
       code,
       codeLanguage: codeLanguage?.trim() || undefined,
+      minutes,
       imageDataUrl: imageFile ? await readFileAsDataUrl(imageFile) : undefined,
       imageName: imageFile?.name,
       imageAlt: typeof candidate.imageAlt === "string" ? candidate.imageAlt : undefined
@@ -242,6 +264,95 @@ function formatPoints(value: number): string {
   return new Intl.NumberFormat(undefined, {
     maximumFractionDigits: 3
   }).format(value);
+}
+
+function csvCell(value: unknown): string {
+  const text = value === undefined || value === null ? "" : String(value);
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function downloadTextFile(filename: string, content: string, type: string): void {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function buildResultsCsv(room: PublicRoomState): string {
+  const maxRound = Math.max(room.settings.questionCount, room.history.length);
+  const roundHeaders = Array.from({ length: maxRound }, (_item, index) => [
+    `R${index + 1} Wager`,
+    `R${index + 1} Grade`,
+    `R${index + 1} Answer`
+  ]).flat();
+  const headers = [
+    "Team",
+    "Rank",
+    "Score",
+    "Bonus Points",
+    "Correct Answer Points",
+    "Rank Bonus",
+    "Score Adjustments",
+    "Bonus Adjustments",
+    "Used Wagers",
+    "Correct Count",
+    "Incorrect Count",
+    "Adjustment Notes",
+    ...roundHeaders
+  ];
+
+  const historyByTeam = new Map<string, RoundHistoryEntry["results"]>();
+  for (const entry of room.history) {
+    for (const result of entry.results) {
+      const teamResults = historyByTeam.get(result.teamId) ?? [];
+      teamResults[entry.round - 1] = result;
+      historyByTeam.set(result.teamId, teamResults);
+    }
+  }
+
+  const rows = room.leaderboard.map((entry) => {
+    const team = room.teams.find((candidate) => candidate.id === entry.teamId);
+    const results = historyByTeam.get(entry.teamId) ?? [];
+    const correctCount = results.filter((result) => result?.grade === "correct").length;
+    const incorrectCount = results.filter((result) => result?.grade === "incorrect").length;
+    const notes = room.adjustments
+      .filter((adjustment) => adjustment.teamId === entry.teamId)
+      .map((adjustment) => {
+        const parts = [];
+        if (adjustment.scoreDelta) parts.push(`score ${adjustment.scoreDelta}`);
+        if (adjustment.bonusDelta) parts.push(`bonus ${adjustment.bonusDelta}`);
+        return `${parts.join(", ")}${adjustment.note ? `: ${adjustment.note}` : ""}`;
+      })
+      .join(" | ");
+
+    const roundCells = Array.from({ length: maxRound }, (_item, index) => {
+      const result = results[index];
+      return [result?.wager ?? "", result?.grade ?? "", result?.answer ?? ""];
+    }).flat();
+
+    return [
+      entry.name,
+      entry.rank,
+      entry.correctWagerTotal,
+      entry.bonusPoints,
+      entry.answerPoints,
+      entry.rankBonus,
+      entry.scoreAdjustment,
+      entry.bonusAdjustment,
+      team?.usedWagers.join(" ") ?? "",
+      correctCount,
+      incorrectCount,
+      notes,
+      ...roundCells
+    ];
+  });
+
+  return [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
 function wagerValues(count: number): number[] {
@@ -488,6 +599,10 @@ function HostLobby({
   const [questionCount, setQuestionCount] = useState(String(room.settings.questionCount));
   const [pointsPerCorrect, setPointsPerCorrect] = useState(String(room.settings.pointsPerCorrect));
   const [bonusText, setBonusText] = useState(room.settings.bonusByRank.join(","));
+  const [answerRevealMode, setAnswerRevealMode] = useState<AnswerRevealMode>(room.settings.answerRevealMode);
+  const [hideLeaderboardDuringAnswering, setHideLeaderboardDuringAnswering] = useState(
+    room.settings.hideLeaderboardDuringAnswering
+  );
   const [status, setStatus] = useState("");
   const [uploadStatus, setUploadStatus] = useState("");
   const uploadedQuestionCount = room.settings.questions.length;
@@ -496,7 +611,15 @@ function HostLobby({
     setQuestionCount(String(room.settings.questionCount));
     setPointsPerCorrect(String(room.settings.pointsPerCorrect));
     setBonusText(room.settings.bonusByRank.join(","));
-  }, [room.settings.questionCount, room.settings.pointsPerCorrect, room.settings.bonusByRank.join(",")]);
+    setAnswerRevealMode(room.settings.answerRevealMode);
+    setHideLeaderboardDuringAnswering(room.settings.hideLeaderboardDuringAnswering);
+  }, [
+    room.settings.questionCount,
+    room.settings.pointsPerCorrect,
+    room.settings.bonusByRank.join(","),
+    room.settings.answerRevealMode,
+    room.settings.hideLeaderboardDuringAnswering
+  ]);
 
   async function saveSettings(event: FormEvent): Promise<void> {
     event.preventDefault();
@@ -510,7 +633,9 @@ function HostLobby({
       questionCount: uploadedQuestionCount || Number(questionCount),
       pointsPerCorrect: Number(pointsPerCorrect),
       bonusByRank,
-      questions: room.settings.questions
+      questions: room.settings.questions,
+      answerRevealMode,
+      hideLeaderboardDuringAnswering
     };
 
     const response = await request("settings:update", { ...hostPayload, settings });
@@ -534,7 +659,9 @@ function HostLobby({
           questionCount: questions.length,
           pointsPerCorrect: Number(pointsPerCorrect),
           bonusByRank,
-          questions
+          questions,
+          answerRevealMode,
+          hideLeaderboardDuringAnswering
         } satisfies GameSettings
       });
 
@@ -557,7 +684,9 @@ function HostLobby({
         questionCount: Math.max(1, Number(questionCount) || room.settings.questionCount),
         pointsPerCorrect: Number(pointsPerCorrect),
         bonusByRank,
-        questions: []
+        questions: [],
+        answerRevealMode,
+        hideLeaderboardDuringAnswering
       } satisfies GameSettings
     });
 
@@ -619,6 +748,25 @@ function HostLobby({
               Rank bonuses
               <input value={bonusText} onChange={(event) => setBonusText(event.target.value)} />
             </label>
+            <label>
+              Answer reveal
+              <select
+                value={answerRevealMode}
+                onChange={(event) => setAnswerRevealMode(event.target.value as AnswerRevealMode)}
+              >
+                <option value="host_only">Host only</option>
+                <option value="after_grading">Show answers after grading</option>
+                <option value="status_only">Show status only</option>
+              </select>
+            </label>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={hideLeaderboardDuringAnswering}
+                onChange={(event) => setHideLeaderboardDuringAnswering(event.target.checked)}
+              />
+              Hide team leaderboard while answering
+            </label>
           </div>
           <div className="upload-panel">
             <div>
@@ -671,6 +819,7 @@ function HostLobby({
           </div>
           {status ? <div className="status-line">{status}</div> : null}
         </form>
+        <QuestionPreviewList questions={room.settings.questions} />
       </div>
 
       <aside className="lobby-side">
@@ -678,7 +827,7 @@ function HostLobby({
           <Users size={20} />
           Teams
         </div>
-        <TeamList teams={room.teams} />
+        <TeamList teams={room.teams} request={request} hostPayload={hostPayload} removable />
         <RulesPanel />
       </aside>
     </section>
@@ -706,6 +855,9 @@ function TeamLobby({ room, team }: { room: PublicRoomState; team: PublicTeam }) 
 }
 
 function GameFrame({ room, children }: { room: PublicRoomState; children: React.ReactNode }) {
+  const hideLeaderboard =
+    room.role === "team" && room.phase === "answering" && room.settings.hideLeaderboardDuringAnswering;
+
   return (
     <section className="game-grid">
       <div className="game-main">
@@ -721,7 +873,7 @@ function GameFrame({ room, children }: { room: PublicRoomState; children: React.
         {children}
       </div>
       <aside className="side-stack">
-        <Leaderboard room={room} />
+        {hideLeaderboard ? <HiddenLeaderboardNotice /> : <Leaderboard room={room} />}
         <RulesPanel />
       </aside>
     </section>
@@ -732,13 +884,13 @@ function currentQuestion(room: PublicRoomState): Question | undefined {
   return room.settings.questions[room.currentRound - 1];
 }
 
-function QuestionCard({ question, round }: { question?: Question; round: number }) {
+function QuestionCard({ question, round, compact = false }: { question?: Question; round: number; compact?: boolean }) {
   if (!question) {
     return null;
   }
 
   return (
-    <article className="question-card">
+    <article className={compact ? "question-card compact" : "question-card"}>
       <div className="question-label">Question {round}</div>
       <div className="question-text">{question.text}</div>
       {question.imageDataUrl ? (
@@ -753,6 +905,36 @@ function QuestionCard({ question, round }: { question?: Question; round: number 
         </div>
       ) : null}
     </article>
+  );
+}
+
+function QuestionPreviewList({ questions }: { questions: Question[] }) {
+  if (questions.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="settings-panel">
+      <div className="panel-title">
+        <Eye size={20} />
+        Question Preview
+      </div>
+      <div className="preview-list">
+        {questions.map((question, index) => (
+          <details className="preview-item" key={`${index}-${question.text.slice(0, 20)}`}>
+            <summary>
+              <span>Question {index + 1}</span>
+              <span>
+                {question.minutes ? `${question.minutes} min` : "Timer manual"}
+                {question.imageDataUrl ? " · image" : ""}
+                {question.code ? " · code" : ""}
+              </span>
+            </summary>
+            <QuestionCard question={question} round={index + 1} compact />
+          </details>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -793,9 +975,14 @@ function HostRoundSetup({
   request: RequestFn;
   hostPayload: { code: string; hostToken: string };
 }) {
-  const [minutes, setMinutes] = useState("2");
+  const questionMinutes = currentQuestion(room)?.minutes;
+  const [minutes, setMinutes] = useState(String(questionMinutes ?? 2));
   const [status, setStatus] = useState("");
   const allLocked = room.teams.length > 0 && room.teams.every((team) => team.wagerLocked);
+
+  useEffect(() => {
+    setMinutes(String(questionMinutes ?? 2));
+  }, [room.currentRound, questionMinutes]);
 
   async function startAnswers(): Promise<void> {
     const response = await request("round:startAnswering", {
@@ -811,7 +998,7 @@ function HostRoundSetup({
     <div className="flow-panel">
       <div className="round-toolbar">
         <label>
-          Minutes
+          Minutes {questionMinutes ? "(from question)" : ""}
           <input
             type="number"
             min={0.1}
@@ -876,6 +1063,7 @@ function HostGrading({
   hostPayload: { code: string; hostToken: string };
 }) {
   const [grades, setGrades] = useState<Record<string, Grade>>({});
+  const [reviewing, setReviewing] = useState(false);
   const [status, setStatus] = useState("");
 
   useEffect(() => {
@@ -886,6 +1074,7 @@ function HostGrading({
       }
     }
     setGrades(defaults);
+    setReviewing(false);
   }, [room.currentRound]);
 
   const ready = room.teams.every((team) => grades[team.id] === "correct" || grades[team.id] === "incorrect");
@@ -900,37 +1089,95 @@ function HostGrading({
   return (
     <div className="flow-panel">
       <QuestionCard question={currentQuestion(room)} round={room.currentRound} />
-      <div className="answer-list">
-        {room.teams.map((team) => (
-          <div className="grade-row" key={team.id}>
-            <div>
-              <div className="team-name">{team.name}</div>
-              <div className="answer-text">{team.currentAnswer || "No answer submitted"}</div>
-            </div>
-            <div className="grade-actions">
-              <button
-                className={grades[team.id] === "correct" ? "grade correct selected" : "grade correct"}
-                title="Mark correct"
-                onClick={() => setGrades((current) => ({ ...current, [team.id]: "correct" }))}
-              >
-                <Check size={18} />
-              </button>
-              <button
-                className={grades[team.id] === "incorrect" ? "grade incorrect selected" : "grade incorrect"}
-                title="Mark incorrect"
-                onClick={() => setGrades((current) => ({ ...current, [team.id]: "incorrect" }))}
-              >
-                <X size={18} />
-              </button>
-            </div>
+      {reviewing ? (
+        <GradeReview room={room} grades={grades} onEdit={() => setReviewing(false)} onSubmit={submitGrades} />
+      ) : (
+        <>
+          <div className="answer-list">
+            {room.teams.map((team) => (
+              <div className="grade-row" key={team.id}>
+                <div>
+                  <div className="team-name">{team.name}</div>
+                  <div className="answer-text">{team.currentAnswer || "No answer submitted"}</div>
+                </div>
+                <div className="grade-actions">
+                  <button
+                    className={grades[team.id] === "correct" ? "grade correct selected" : "grade correct"}
+                    title="Mark correct"
+                    onClick={() => setGrades((current) => ({ ...current, [team.id]: "correct" }))}
+                  >
+                    <Check size={18} />
+                  </button>
+                  <button
+                    className={grades[team.id] === "incorrect" ? "grade incorrect selected" : "grade incorrect"}
+                    title="Mark incorrect"
+                    onClick={() => setGrades((current) => ({ ...current, [team.id]: "incorrect" }))}
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <button className="primary submit-row" disabled={!ready} onClick={submitGrades}>
-        <Check size={18} />
-        Submit Grades
-      </button>
+          <button className="primary submit-row" disabled={!ready} onClick={() => setReviewing(true)}>
+            <Check size={18} />
+            Review Grades
+          </button>
+        </>
+      )}
       {status ? <div className="status-line">{status}</div> : null}
+    </div>
+  );
+}
+
+function GradeReview({
+  room,
+  grades,
+  onEdit,
+  onSubmit
+}: {
+  room: PublicRoomState;
+  grades: Record<string, Grade>;
+  onEdit: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="review-panel">
+      <div className="panel-title">
+        <Check size={20} />
+        Review Grades
+      </div>
+      <div className="data-table">
+        <div className="review-row review-head">
+          <span>Team</span>
+          <span>Grade</span>
+          <span>Score</span>
+          <span>Bonus</span>
+        </div>
+        {room.teams.map((team) => {
+          const grade = grades[team.id];
+          const scoreDelta = grade === "correct" ? team.currentWager ?? 0 : 0;
+          const bonusDelta = grade === "correct" ? room.settings.pointsPerCorrect : 0;
+          return (
+            <div className="review-row" key={team.id}>
+              <span className="team-name">{team.name}</span>
+              <span>{grade === "correct" ? "Correct" : "Incorrect"}</span>
+              <span>+{formatPoints(scoreDelta)}</span>
+              <span>+{formatPoints(bonusDelta)}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="action-row">
+        <button className="secondary" onClick={onEdit}>
+          <X size={18} />
+          Edit
+        </button>
+        <button className="primary" onClick={onSubmit}>
+          <Check size={18} />
+          Finalize Grades
+        </button>
+      </div>
     </div>
   );
 }
@@ -954,19 +1201,24 @@ function HostBetweenRounds({
   }
 
   return (
-    <div className="flow-panel centered">
-      <Trophy size={36} />
-      <h2>Round {room.currentRound} scored</h2>
-      <button className="primary" onClick={nextRound}>
-        <Play size={18} />
-        Next Round
-      </button>
-      {status ? <div className="status-line">{status}</div> : null}
+    <div className="stack-panels">
+      <div className="flow-panel centered">
+        <Trophy size={36} />
+        <h2>Round {room.currentRound} scored</h2>
+        <button className="primary" onClick={nextRound}>
+          <Play size={18} />
+          Next Round
+        </button>
+        {status ? <div className="status-line">{status}</div> : null}
+      </div>
+      <RoundHistoryPanel room={room} />
+      <ManualAdjustmentPanel room={room} request={request} hostPayload={hostPayload} />
     </div>
   );
 }
 
 function HostFinished({
+  room,
   request,
   hostPayload
 }: {
@@ -983,16 +1235,180 @@ function HostFinished({
     }
   }
 
+  function exportCsv(): void {
+    downloadTextFile(`ta-game-${room.code}-results.csv`, buildResultsCsv(room), "text/csv;charset=utf-8");
+  }
+
   return (
-    <div className="flow-panel centered">
-      <Trophy size={42} />
-      <h2>Final standings</h2>
-      <button className="secondary" onClick={resetGame}>
-        <RotateCcw size={18} />
-        Back to Lobby
+    <div className="stack-panels">
+      <div className="flow-panel centered">
+        <Trophy size={42} />
+        <h2>Final standings</h2>
+        <Podium leaderboard={room.leaderboard} />
+        <div className="action-row">
+          <button className="secondary" onClick={exportCsv}>
+            <Download size={18} />
+            Export CSV
+          </button>
+          <button className="secondary" onClick={resetGame}>
+            <RotateCcw size={18} />
+            Back to Lobby
+          </button>
+        </div>
+        {status ? <div className="status-line">{status}</div> : null}
+      </div>
+      <RoundHistoryPanel room={room} />
+      <ManualAdjustmentPanel room={room} request={request} hostPayload={hostPayload} />
+    </div>
+  );
+}
+
+function Podium({ leaderboard }: { leaderboard: PublicRoomState["leaderboard"] }) {
+  const topTeams = leaderboard.slice(0, 3);
+  if (topTeams.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="podium">
+      {topTeams.map((entry) => (
+        <div className={`podium-place place-${entry.rank}`} key={entry.teamId}>
+          <span>{entry.rank}</span>
+          <strong>{entry.name}</strong>
+          <small>
+            Score {formatPoints(entry.correctWagerTotal)} · Bonus {formatPoints(entry.bonusPoints)}
+          </small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ManualAdjustmentPanel({
+  room,
+  request,
+  hostPayload
+}: {
+  room: PublicRoomState;
+  request: RequestFn;
+  hostPayload: { code: string; hostToken: string };
+}) {
+  const [teamId, setTeamId] = useState(room.teams[0]?.id ?? "");
+  const [scoreDelta, setScoreDelta] = useState("");
+  const [bonusDelta, setBonusDelta] = useState("");
+  const [note, setNote] = useState("");
+  const [status, setStatus] = useState("");
+
+  useEffect(() => {
+    if (!room.teams.some((team) => team.id === teamId)) {
+      setTeamId(room.teams[0]?.id ?? "");
+    }
+  }, [room.teams, teamId]);
+
+  async function submitAdjustment(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    const response = await request("score:adjust", {
+      ...hostPayload,
+      teamId,
+      scoreDelta: Number(scoreDelta || 0),
+      bonusDelta: Number(bonusDelta || 0),
+      note
+    });
+
+    if (!response.ok) {
+      setStatus(response.message);
+      return;
+    }
+
+    setScoreDelta("");
+    setBonusDelta("");
+    setNote("");
+    setStatus("Adjustment applied.");
+  }
+
+  if (room.teams.length === 0) {
+    return null;
+  }
+
+  return (
+    <form className="flow-panel" onSubmit={submitAdjustment}>
+      <div className="panel-title">
+        <SettingsIcon size={20} />
+        Manual Adjustment
+      </div>
+      <div className="settings-grid">
+        <label>
+          Team
+          <select value={teamId} onChange={(event) => setTeamId(event.target.value)}>
+            {room.teams.map((team) => (
+              <option key={team.id} value={team.id}>
+                {team.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Score delta
+          <input type="number" step="any" value={scoreDelta} onChange={(event) => setScoreDelta(event.target.value)} />
+        </label>
+        <label>
+          Bonus delta
+          <input type="number" step="any" value={bonusDelta} onChange={(event) => setBonusDelta(event.target.value)} />
+        </label>
+        <label>
+          Note
+          <input value={note} onChange={(event) => setNote(event.target.value)} maxLength={180} />
+        </label>
+      </div>
+      <button className="secondary submit-row" disabled={!teamId}>
+        <Plus size={18} />
+        Apply Adjustment
       </button>
       {status ? <div className="status-line">{status}</div> : null}
-    </div>
+    </form>
+  );
+}
+
+function RoundHistoryPanel({ room }: { room: PublicRoomState }) {
+  if (room.history.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="flow-panel">
+      <div className="panel-title">
+        <History size={20} />
+        Round History
+      </div>
+      <div className="history-list">
+        {[...room.history].reverse().map((entry) => (
+          <details className="history-item" key={entry.round} open={entry.round === room.history.length}>
+            <summary>
+              <span>Round {entry.round}</span>
+              <span>{entry.results.length} results</span>
+            </summary>
+            {entry.question ? <QuestionCard question={entry.question} round={entry.round} compact /> : null}
+            <div className="history-results">
+              {entry.results.map((result) => (
+                <div className="history-result" key={result.teamId}>
+                  <div>
+                    <strong>{result.teamName}</strong>
+                    <span>Wager {result.wager ?? "-"}</span>
+                  </div>
+                  <div className={result.grade === "correct" ? "answer-chip done" : "answer-chip"}>
+                    {result.grade === "correct" ? "Correct" : "Incorrect"}
+                  </div>
+                  {result.answer !== undefined ? <div className="answer-text span-history">{result.answer}</div> : null}
+                  <div className="history-delta">
+                    Score +{formatPoints(result.scoreDelta)} · Bonus +{formatPoints(result.bonusDelta)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </details>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -1019,27 +1435,36 @@ function TeamGame({
 
   if (room.phase === "grading") {
     return (
-      <div className="flow-panel centered">
-        <Timer size={36} />
-        <h2>Answer locked</h2>
-        <p className="muted">{team.currentAnswer || "No answer submitted"}</p>
+      <div className="flow-panel">
+        <div className="centered compact-center">
+          <Timer size={36} />
+          <h2>Answer locked</h2>
+          <p className="muted">{team.currentAnswer || "No answer submitted"}</p>
+        </div>
       </div>
     );
   }
 
   if (room.phase === "finished") {
     return (
-      <div className="flow-panel centered">
-        <Trophy size={42} />
-        <h2>Final standings</h2>
+      <div className="stack-panels">
+        <div className="flow-panel centered">
+          <Trophy size={42} />
+          <h2>Final standings</h2>
+          <Podium leaderboard={room.leaderboard} />
+        </div>
+        <RoundHistoryPanel room={room} />
       </div>
     );
   }
 
   return (
-    <div className="flow-panel centered">
-      <Trophy size={36} />
-      <h2>Round {room.currentRound} scored</h2>
+    <div className="stack-panels">
+      <div className="flow-panel centered">
+        <Trophy size={36} />
+        <h2>Round {room.currentRound} scored</h2>
+      </div>
+      <RoundHistoryPanel room={room} />
     </div>
   );
 }
@@ -1222,6 +1647,18 @@ function Leaderboard({ room }: { room: PublicRoomState }) {
   );
 }
 
+function HiddenLeaderboardNotice() {
+  return (
+    <section className="leaderboard hidden-leaderboard">
+      <div className="panel-title">
+        <EyeOff size={20} />
+        Leaderboard Hidden
+      </div>
+      <p className="muted">Standings will return after grading.</p>
+    </section>
+  );
+}
+
 function RulesPanel() {
   return (
     <section className="rules-panel">
@@ -1251,16 +1688,42 @@ function RulesPanel() {
   );
 }
 
-function TeamList({ teams }: { teams: PublicTeam[] }) {
+function TeamList({
+  teams,
+  request,
+  hostPayload,
+  removable = false
+}: {
+  teams: PublicTeam[];
+  request?: RequestFn;
+  hostPayload?: { code: string; hostToken: string };
+  removable?: boolean;
+}) {
   if (teams.length === 0) {
     return <div className="empty-state">No teams yet.</div>;
+  }
+
+  async function removeTeam(teamId: string): Promise<void> {
+    if (!request || !hostPayload) {
+      return;
+    }
+
+    await request("team:remove", { ...hostPayload, teamId });
   }
 
   return (
     <div className="team-list">
       {teams.map((team) => (
         <div className="team-row" key={team.id}>
-          <span>{team.name}</span>
+          <span>
+            {team.name}
+            <small>{team.connected ? "Connected" : "Disconnected"}</small>
+          </span>
+          {removable ? (
+            <button className="icon-only danger" title="Remove team" onClick={() => void removeTeam(team.id)}>
+              <Trash2 size={17} />
+            </button>
+          ) : null}
         </div>
       ))}
     </div>

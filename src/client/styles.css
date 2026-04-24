@@ -34,6 +34,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -165,6 +166,7 @@ label {
 }
 
 input,
+select,
 textarea {
   width: 100%;
   border: 1px solid #cfd6d2;
@@ -182,6 +184,7 @@ textarea {
 }
 
 input:focus,
+select:focus,
 textarea:focus {
   border-color: var(--blue);
   box-shadow: 0 0 0 3px rgba(45, 95, 139, 0.14);
@@ -242,6 +245,10 @@ button:disabled {
   border: 1px solid var(--line);
 }
 
+.icon-only.danger {
+  color: var(--red);
+}
+
 .icon-text {
   padding: 0 14px;
 }
@@ -268,6 +275,17 @@ button:disabled {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.checkbox-label {
+  align-content: end;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.checkbox-label input {
+  width: auto;
 }
 
 .upload-panel {
@@ -362,8 +380,16 @@ button:disabled {
 }
 
 .team-row {
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr) auto;
   font-weight: 800;
+}
+
+.team-row small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  margin-top: 2px;
 }
 
 .team-pill,
@@ -492,6 +518,20 @@ h2 {
   background: #fbfaf5;
 }
 
+.question-card.compact {
+  box-shadow: none;
+  margin-bottom: 0;
+  padding: 12px;
+}
+
+.question-card.compact .question-image {
+  max-height: 180px;
+}
+
+.question-card.compact .question-code {
+  max-height: 180px;
+}
+
 .question-label,
 .code-label {
   color: var(--muted);
@@ -599,12 +639,21 @@ h2 {
   margin-top: 16px;
 }
 
+.stack-panels {
+  display: grid;
+  gap: 16px;
+}
+
 .centered {
   display: grid;
   justify-items: center;
   text-align: center;
   gap: 12px;
   padding: 42px 18px;
+}
+
+.compact-center {
+  padding: 22px 12px;
 }
 
 .team-round-head {
@@ -698,6 +747,130 @@ h2 {
   font-size: 0.78rem;
 }
 
+.hidden-leaderboard p {
+  margin: 0;
+}
+
+.preview-list,
+.history-list,
+.history-results {
+  display: grid;
+  gap: 10px;
+}
+
+.preview-item,
+.history-item {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  padding: 10px;
+}
+
+.preview-item summary,
+.history-item summary {
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 900;
+}
+
+.preview-item summary span:last-child,
+.history-item summary span:last-child {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.preview-item .question-card,
+.history-item .question-card {
+  margin-top: 10px;
+}
+
+.review-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px 80px 80px;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.review-head {
+  min-height: auto;
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.podium {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  margin: 8px 0;
+}
+
+.podium-place {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfaf5;
+  padding: 12px;
+  display: grid;
+  gap: 5px;
+  min-height: 100px;
+}
+
+.podium-place span {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--green);
+  color: white;
+  font-weight: 900;
+}
+
+.podium-place small {
+  color: var(--muted);
+  line-height: 1.3;
+}
+
+.history-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: #fbfaf5;
+}
+
+.history-result span,
+.history-delta {
+  display: block;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.span-history {
+  grid-column: 1 / -1;
+}
+
+.history-delta {
+  grid-column: 1 / -1;
+  font-weight: 800;
+}
+
 .rules-panel {
   box-shadow: none;
   padding: 14px;
@@ -785,6 +958,11 @@ h2 {
 
   .table-row {
     grid-template-columns: minmax(0, 1fr) 64px 90px;
+  }
+
+  .podium,
+  .review-row {
+    grid-template-columns: 1fr;
   }
 }
 
