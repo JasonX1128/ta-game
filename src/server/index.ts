@@ -986,6 +986,63 @@ function parseGemmaPartSuggestions(rawParts: unknown, parts: QuestionPart[]): Pa
   });
 }
 
+function buildFallbackGemmaText(
+  prefix: string,
+  overallText: string | undefined,
+  maxLength: number
+): string | undefined {
+  const trimmedOverall = overallText?.trim();
+  if (!trimmedOverall) {
+    return prefix.slice(0, maxLength);
+  }
+
+  const separator = " Overall note: ";
+  const available = maxLength - prefix.length - separator.length;
+  if (available <= 0) {
+    return prefix.slice(0, maxLength);
+  }
+
+  return `${prefix}${separator}${trimmedOverall.slice(0, available).trimEnd()}`;
+}
+
+function fillMissingGemmaPartSuggestions(
+  partSuggestions: PartGradeSuggestion[],
+  parts: QuestionPart[],
+  confidence: number | undefined,
+  overallRationale: string | undefined,
+  overallFeedback: string | undefined
+): PartGradeSuggestion[] {
+  if (parts.length <= 1 || partSuggestions.length >= parts.length) {
+    return partSuggestions;
+  }
+
+  const suggestionByPartId = new Map(partSuggestions.map((suggestion) => [suggestion.partId, suggestion]));
+
+  return parts.map((part, index) => {
+    const existing = suggestionByPartId.get(part.id);
+    if (existing) {
+      return existing;
+    }
+
+    const label = part.label?.trim() || `Part ${index + 1}`;
+    return {
+      partId: part.id,
+      credit: 0,
+      confidence,
+      rationale: buildFallbackGemmaText(
+        `Gemma did not return a part-level suggestion for ${label}, so it was defaulted to 0% credit.`,
+        overallRationale,
+        300
+      ),
+      feedback: buildFallbackGemmaText(
+        `No part-specific Gemma feedback was returned for ${label}, so this part was left at 0% credit for review.`,
+        overallFeedback,
+        800
+      )
+    };
+  });
+}
+
 function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>, parts: QuestionPart[]): GradeSuggestion[] {
   const parsed = parseJsonFromModelText(rawText);
   const suggestions = Array.isArray(parsed)
@@ -1014,13 +1071,34 @@ function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>, parts
     };
     const teamId = typeof candidate.teamId === "string" ? candidate.teamId : "";
     const grade = candidate.grade;
-    const partSuggestions = parseGemmaPartSuggestions(candidate.partSuggestions, parts);
+    const confidence = Number(candidate.confidence);
+    const normalizedConfidence = Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : undefined;
+    const rationale = typeof candidate.rationale === "string" ? candidate.rationale.slice(0, 300) : undefined;
+    const feedback = typeof candidate.feedback === "string"
+      ? candidate.feedback
+      : typeof candidate.rationale === "string"
+        ? candidate.rationale
+        : undefined;
+    const rawCredit = cleanCredit(candidate.credit);
+    const parsedPartSuggestions = parseGemmaPartSuggestions(candidate.partSuggestions, parts);
+    const shouldFillMissingParts = parts.length > 1
+      && parsedPartSuggestions.length < parts.length
+      && (parsedPartSuggestions.length > 0 || rawCredit === 0);
+    const partSuggestions = shouldFillMissingParts
+      ? fillMissingGemmaPartSuggestions(
+        parsedPartSuggestions,
+        parts,
+        normalizedConfidence,
+        rationale,
+        feedback?.slice(0, 800)
+      )
+      : parsedPartSuggestions;
     const credit = partSuggestions.length > 0
       ? roundPoints(parts.reduce((sum, part) => {
         const suggestion = partSuggestions.find((candidate) => candidate.partId === part.id);
         return sum + part.fraction * (suggestion?.credit ?? 0);
       }, 0))
-      : cleanCredit(candidate.credit);
+      : rawCredit;
     const finalGrade: Grade = grade === "correct" || grade === "incorrect"
       ? grade
       : credit !== undefined && credit >= 0.999
@@ -1030,19 +1108,12 @@ function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>, parts
       return [];
     }
 
-    const confidence = Number(candidate.confidence);
-    const feedback = typeof candidate.feedback === "string"
-      ? candidate.feedback
-      : typeof candidate.rationale === "string"
-        ? candidate.rationale
-        : undefined;
-
     return [{
       teamId,
       grade: finalGrade,
       credit,
-      confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : undefined,
-      rationale: typeof candidate.rationale === "string" ? candidate.rationale.slice(0, 300) : undefined,
+      confidence: normalizedConfidence,
+      rationale,
       feedback: feedback?.slice(0, 800),
       partSuggestions
     }];
