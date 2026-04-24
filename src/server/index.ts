@@ -1037,6 +1037,17 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunkSize = Math.max(1, Math.floor(size));
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < items.length; index += chunkSize) {
+    chunks.push(items.slice(index, index + chunkSize));
+  }
+
+  return chunks;
+}
+
 function stringifyForDebug(value: unknown): string {
   if (typeof value === "string") {
     return value;
@@ -1066,45 +1077,8 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
     wager: team.currentWager ?? null,
     studentAnswer: team.currentAnswer ?? ""
   }));
-  const validTeamIds = new Set(teams.map((team) => team.teamId));
-  const prompt = [
-    "You are helping a human host grade a classroom game.",
-    "Use the question, official answers, optional code blocks, and each team's student answer.",
-    "Grade every question part with a decimal credit from 0 to 1.",
-    "Use 1 for full credit, 0 for no credit, and a decimal for partial credit.",
-    "The question.parts array is authoritative. Return exactly one partSuggestion for every object in question.parts.",
-    "Copy each partSuggestion.partId exactly from the matching question part. Do not infer part order from labels alone.",
-    "Each partSuggestion rationale and feedback must discuss only that specific part's text and official answer.",
-    "If the student answer has multiple lines, map content to parts by meaning, not by line position alone.",
-    "Set top-level credit to the weighted sum of each part credit times that part's fraction.",
-    "Set the overall grade to correct only when all parts receive full credit.",
-    "Also write feedback for each team that will be shown directly to that team after grades are finalized.",
-    "Student-facing feedback should be concise, constructive, and explain what was right or missing without mentioning internal confidence.",
-    "Return only JSON matching this schema:",
-    '{"suggestions":[{"teamId":"string","grade":"correct|incorrect","credit":0.0,"confidence":0.0,"rationale":"short host-only explanation","feedback":"student-facing feedback","partSuggestions":[{"partId":"exact partId from question.parts","partNumber":1,"credit":0.0,"confidence":0.0,"rationale":"short explanation for only this part","feedback":"student-facing feedback for only this part"}]}]}',
-    "Do not include markdown or commentary outside JSON.",
-    "",
-    JSON.stringify({
-      round: room.currentRound,
-      question: {
-        text: question?.text ?? "",
-        codeLanguage: question?.codeLanguage ?? "",
-        code: question?.code ?? "",
-        officialAnswer: question?.answer ?? "",
-        parts: parts.map((part, index) => ({
-          partNumber: index + 1,
-          partId: part.id,
-          label: part.label ?? part.id,
-          fraction: part.fraction,
-          text: part.text,
-          codeLanguage: part.codeLanguage ?? "",
-          code: part.code ?? "",
-          officialAnswer: part.answer ?? ""
-        }))
-      },
-      teams
-    })
-  ].join("\n");
+  const batchSize = Math.max(1, Math.ceil(teams.length / 15));
+  const teamBatches = chunkArray(teams, batchSize);
 
   const url = `${apiBase.replace(/\/$/, "")}/${modelPath}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const responseSchema = {
@@ -1144,7 +1118,55 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
     required: ["suggestions"]
   };
 
-  async function postGemma(includeSchema: boolean): Promise<{ ok: true; data: unknown } | { ok: false; status: number; text: string }> {
+  function buildPrompt(batchTeams: typeof teams, batchIndex: number, batchCount: number): string {
+    return [
+      "You are helping a human host grade a classroom game.",
+      "Use the question, official answers, optional code blocks, and each team's student answer.",
+      "Grade every question part with a decimal credit from 0 to 1.",
+      "Use 1 for full credit, 0 for no credit, and a decimal for partial credit.",
+      "The question.parts array is authoritative. Return exactly one partSuggestion for every object in question.parts.",
+      "Copy each partSuggestion.partId exactly from the matching question part. Do not infer part order from labels alone.",
+      "Each partSuggestion rationale and feedback must discuss only that specific part's text and official answer.",
+      "If the student answer has multiple lines, map content to parts by meaning, not by line position alone.",
+      "Set top-level credit to the weighted sum of each part credit times that part's fraction.",
+      "Set the overall grade to correct only when all parts receive full credit.",
+      "Also write feedback for each team that will be shown directly to that team after grades are finalized.",
+      "Student-facing feedback should be concise, constructive, and explain what was right or missing without mentioning internal confidence.",
+      "Return only JSON matching this schema:",
+      '{"suggestions":[{"teamId":"string","grade":"correct|incorrect","credit":0.0,"confidence":0.0,"rationale":"short host-only explanation","feedback":"student-facing feedback","partSuggestions":[{"partId":"exact partId from question.parts","partNumber":1,"credit":0.0,"confidence":0.0,"rationale":"short explanation for only this part","feedback":"student-facing feedback for only this part"}]}]}',
+      "Do not include markdown or commentary outside JSON.",
+      "",
+      JSON.stringify({
+        round: room.currentRound,
+        batch: {
+          index: batchIndex + 1,
+          total: batchCount
+        },
+        question: {
+          text: question?.text ?? "",
+          codeLanguage: question?.codeLanguage ?? "",
+          code: question?.code ?? "",
+          officialAnswer: question?.answer ?? "",
+          parts: parts.map((part, index) => ({
+            partNumber: index + 1,
+            partId: part.id,
+            label: part.label ?? part.id,
+            fraction: part.fraction,
+            text: part.text,
+            codeLanguage: part.codeLanguage ?? "",
+            code: part.code ?? "",
+            officialAnswer: part.answer ?? ""
+          }))
+        },
+        teams: batchTeams
+      })
+    ].join("\n");
+  }
+
+  async function postGemma(
+    prompt: string,
+    includeSchema: boolean
+  ): Promise<{ ok: true; data: unknown } | { ok: false; status: number; text: string }> {
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -1177,13 +1199,14 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
     }
   }
 
-  async function postGemmaWithRetry(includeSchema: boolean): Promise<
-    { ok: true; data: unknown } | { ok: false; status: number; text: string }
-  > {
+  async function postGemmaWithRetryForPrompt(
+    prompt: string,
+    includeSchema: boolean
+  ): Promise<{ ok: true; data: unknown } | { ok: false; status: number; text: string }> {
     const delays = [700, 1600];
 
     for (let attempt = 0; attempt <= delays.length; attempt += 1) {
-      const result = await postGemma(includeSchema);
+      const result = await postGemma(prompt, includeSchema);
       if (result.ok || ![429, 500, 502, 503, 504].includes(result.status) || attempt === delays.length) {
         return result;
       }
@@ -1191,37 +1214,47 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
       await wait(delays[attempt]);
     }
 
-    return postGemma(includeSchema);
+    return postGemma(prompt, includeSchema);
   }
 
-  let result = await postGemmaWithRetry(true);
-  if (
-    !result.ok &&
-    result.status === 400 &&
-    /schema|responseJsonSchema|unsupported|unknown field|invalid/i.test(result.text)
-  ) {
-    result = await postGemmaWithRetry(false);
+  const allSuggestions: GradeSuggestion[] = [];
+  for (const [batchIndex, batchTeams] of teamBatches.entries()) {
+    const validTeamIds = new Set(batchTeams.map((team) => team.teamId));
+    const prompt = buildPrompt(batchTeams, batchIndex, teamBatches.length);
+
+    let result = await postGemmaWithRetryForPrompt(prompt, true);
+    if (
+      !result.ok &&
+      result.status === 400 &&
+      /schema|responseJsonSchema|unsupported|unknown field|invalid/i.test(result.text)
+    ) {
+      result = await postGemmaWithRetryForPrompt(prompt, false);
+    }
+
+    if (!result.ok) {
+      throw new Error(
+        `Gemma request failed for batch ${batchIndex + 1}/${teamBatches.length} (${result.status}).\n\nFull Gemma response:\n${result.text}`
+      );
+    }
+
+    const text = extractGemmaText(result.data);
+    if (!text) {
+      throw new Error(
+        `Gemma response did not contain text for batch ${batchIndex + 1}/${teamBatches.length}.\n\nFull Gemma response:\n${stringifyForDebug(result.data)}`
+      );
+    }
+
+    try {
+      allSuggestions.push(...parseGemmaSuggestions(text, validTeamIds, parts));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not parse Gemma suggestions.";
+      throw new Error(
+        `${message}\n\nGemma batch ${batchIndex + 1}/${teamBatches.length}\n\nFull Gemma model text:\n${text}\n\nFull Gemma response:\n${stringifyForDebug(result.data)}`
+      );
+    }
   }
 
-  if (!result.ok) {
-    throw new Error(`Gemma request failed (${result.status}).\n\nFull Gemma response:\n${result.text}`);
-  }
-
-  const text = extractGemmaText(result.data);
-  if (!text) {
-    throw new Error(
-      `Gemma response did not contain text.\n\nFull Gemma response:\n${stringifyForDebug(result.data)}`
-    );
-  }
-
-  try {
-    return parseGemmaSuggestions(text, validTeamIds, parts);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not parse Gemma suggestions.";
-    throw new Error(
-      `${message}\n\nFull Gemma model text:\n${text}\n\nFull Gemma response:\n${stringifyForDebug(result.data)}`
-    );
-  }
+  return allSuggestions;
 }
 
 async function cachedGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSuggestion[]> {
