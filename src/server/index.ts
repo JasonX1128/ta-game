@@ -650,8 +650,8 @@ io.on("connection", (socket) => {
         return;
       }
 
-      const answer = String(payload.answer ?? "").trim();
-      if (!answer) {
+      const answer = String(payload.answer ?? "");
+      if (!answer.trim()) {
         fail(socket, ack, "Answer cannot be empty.");
         return;
       }
