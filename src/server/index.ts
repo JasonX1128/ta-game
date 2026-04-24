@@ -274,8 +274,13 @@ function publicState(room: RoomRecord, context: SocketContext): PublicRoomState 
 }
 
 function broadcastState(room: RoomRecord): void {
-  const socketIds = io.sockets.adapter.rooms.get(room.code);
-  if (!socketIds) {
+  const socketIds = new Set([
+    ...(io.sockets.adapter.rooms.get(room.code) ?? []),
+    ...room.hostSocketIds,
+    ...room.teams.flatMap((team) => [...team.socketIds])
+  ]);
+
+  if (socketIds.size === 0) {
     return;
   }
 
@@ -310,6 +315,18 @@ function removeSocketFromPreviousRoom(socket: Socket): void {
 }
 
 function bindSocket(socket: Socket, room: RoomRecord, context: SocketContext): void {
+  const previous = connections.get(socket.id);
+  if (previous?.code === context.code && previous.role === context.role && previous.teamId === context.teamId) {
+    socket.join(room.code);
+    if (context.role === "host") {
+      room.hostSocketIds.add(socket.id);
+    } else if (context.teamId) {
+      const team = room.teams.find((candidate) => candidate.id === context.teamId);
+      team?.socketIds.add(socket.id);
+    }
+    return;
+  }
+
   removeSocketFromPreviousRoom(socket);
 
   connections.set(socket.id, context);

@@ -52,6 +52,7 @@ type RequestFn = <T extends object = Record<string, never>>(
 ) => Promise<Ack<T>>;
 
 const SESSION_KEY = "ta-game-session";
+const STATE_SYNC_INTERVAL_MS = 4000;
 const SOCKET_URL =
   import.meta.env.VITE_SOCKET_URL ?? (import.meta.env.DEV ? "http://localhost:3000" : window.location.origin);
 
@@ -76,6 +77,10 @@ function saveSession(session: SavedSession | null): void {
   }
 
   window.localStorage.removeItem(SESSION_KEY);
+}
+
+function isInvalidSessionMessage(message: string): boolean {
+  return message === "Room not found." || message.includes("credentials") || message.includes("Team not found");
 }
 
 function phaseLabel(phase: PublicRoomState["phase"]): string {
@@ -391,6 +396,7 @@ export default function App() {
   const [session, setSessionState] = useState<SavedSession | null>(() => loadSession());
   const [room, setRoom] = useState<PublicRoomState | null>(null);
   const [error, setError] = useState("");
+  const syncInFlight = useRef(false);
 
   function setSession(next: SavedSession | null): void {
     saveSession(next);
@@ -436,14 +442,71 @@ export default function App() {
       return;
     }
 
-    request<{ code: string; role: Role; teamId?: string }>("room:rejoin", session).then((response) => {
-      if (!response.ok) {
+    let cancelled = false;
+
+    async function syncSavedSession(showRecoverableError: boolean): Promise<void> {
+      if (syncInFlight.current) {
+        return;
+      }
+
+      syncInFlight.current = true;
+      const response = await request<{ code: string; role: Role; teamId?: string }>("room:rejoin", session, 5000);
+      syncInFlight.current = false;
+      if (cancelled || response.ok) {
+        return;
+      }
+
+      if (isInvalidSessionMessage(response.message)) {
         setSession(null);
         setRoom(null);
         setError(response.message);
+        return;
+      }
+
+      if (showRecoverableError) {
+        setError(response.message);
+      }
+    }
+
+    void syncSavedSession(true);
+    const interval = window.setInterval(() => {
+      void syncSavedSession(false);
+    }, STATE_SYNC_INTERVAL_MS);
+    const syncOnFocus = () => {
+      void syncSavedSession(false);
+    };
+    const syncOnVisibility = () => {
+      if (!document.hidden) {
+        void syncSavedSession(false);
+      }
+    };
+
+    window.addEventListener("focus", syncOnFocus);
+    document.addEventListener("visibilitychange", syncOnVisibility);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", syncOnFocus);
+      document.removeEventListener("visibilitychange", syncOnVisibility);
+    };
+  }, [socket.connected, session?.code, session?.role, session?.hostToken, session?.teamToken]);
+
+  useEffect(() => {
+    if (!session || !socket.connected || !room || room.code === session.code) {
+      return;
+    }
+
+    request<{ code: string; role: Role; teamId?: string }>("room:rejoin", session, 5000).then((response) => {
+      if (!response.ok) {
+        if (isInvalidSessionMessage(response.message)) {
+          setSession(null);
+          setRoom(null);
+        }
+        setError(response.message);
       }
     });
-  }, [socket.connected, session?.code, session?.role]);
+  }, [room?.code, socket.connected, session?.code, session?.role, session?.hostToken, session?.teamToken]);
 
   async function createRoom(): Promise<void> {
     const response = await request<{ code: string; hostToken: string }>("room:create", {});
