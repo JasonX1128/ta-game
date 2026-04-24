@@ -607,6 +607,39 @@ h2 {
   margin-top: 12px;
 }
 
+.debug-panel {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfaf5;
+  padding: 12px;
+}
+
+.debug-panel summary {
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.debug-batch-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.debug-batch {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.debug-batch:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.debug-code {
+  max-height: 220px;
+}
+
 .question-code-wrap {
   margin-top: 12px;
 }

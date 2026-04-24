@@ -26,6 +26,7 @@ import { questionParts, questionTopic } from "../shared/types";
 import type {
   Ack,
   AnswerRevealMode,
+  GemmaDebugBatch,
   GameSettings,
   Grade,
   GradeSuggestion,
@@ -904,6 +905,7 @@ function HostLobby({
     room.settings.hideLeaderboardDuringAnswering
   );
   const [llmGradingEnabled, setLlmGradingEnabled] = useState(room.settings.llmGradingEnabled);
+  const [showFullGemmaResponse, setShowFullGemmaResponse] = useState(room.settings.showFullGemmaResponse);
   const [llmGradingPassword, setLlmGradingPassword] = useState("");
   const [status, setStatus] = useState("");
   const [uploadStatus, setUploadStatus] = useState("");
@@ -917,6 +919,7 @@ function HostLobby({
     setScrambleQuestionOrder(room.settings.scrambleQuestionOrder);
     setHideLeaderboardDuringAnswering(room.settings.hideLeaderboardDuringAnswering);
     setLlmGradingEnabled(room.settings.llmGradingEnabled);
+    setShowFullGemmaResponse(room.settings.showFullGemmaResponse);
     if (room.settings.llmGradingEnabled) {
       setLlmGradingPassword("");
     }
@@ -927,7 +930,8 @@ function HostLobby({
     room.settings.answerRevealMode,
     room.settings.scrambleQuestionOrder,
     room.settings.hideLeaderboardDuringAnswering,
-    room.settings.llmGradingEnabled
+    room.settings.llmGradingEnabled,
+    room.settings.showFullGemmaResponse
   ]);
 
   function settingsPayload(settings: GameSettings): unknown {
@@ -955,7 +959,8 @@ function HostLobby({
       scrambleQuestionOrder,
       answerRevealMode,
       hideLeaderboardDuringAnswering,
-      llmGradingEnabled
+      llmGradingEnabled,
+      showFullGemmaResponse
     };
 
     const response = await request("settings:update", settingsPayload(settings));
@@ -981,7 +986,8 @@ function HostLobby({
         scrambleQuestionOrder,
         answerRevealMode,
         hideLeaderboardDuringAnswering,
-        llmGradingEnabled
+        llmGradingEnabled,
+        showFullGemmaResponse
       };
 
       const response = await request("settings:update", settingsPayload(settings));
@@ -1007,7 +1013,8 @@ function HostLobby({
       scrambleQuestionOrder,
       answerRevealMode,
       hideLeaderboardDuringAnswering,
-      llmGradingEnabled
+      llmGradingEnabled,
+      showFullGemmaResponse
     };
 
     const response = await request("settings:update", settingsPayload(settings));
@@ -1104,6 +1111,14 @@ function HostLobby({
                 onChange={(event) => setLlmGradingEnabled(event.target.checked)}
               />
               Enable LLM grading suggestions
+            </label>
+            <label className="checkbox-label span-2">
+              <input
+                type="checkbox"
+                checked={showFullGemmaResponse}
+                onChange={(event) => setShowFullGemmaResponse(event.target.checked)}
+              />
+              Show full Gemma response while grading (host-only debug)
             </label>
             {llmGradingEnabled && !room.settings.llmGradingEnabled ? (
               <label className="span-2">
@@ -1571,6 +1586,7 @@ function HostGrading({
   const [suggesting, setSuggesting] = useState(false);
   const [suggestionStatus, setSuggestionStatus] = useState("");
   const [suggestionTone, setSuggestionTone] = useState<"info" | "error">("info");
+  const [gemmaDebugBatches, setGemmaDebugBatches] = useState<GemmaDebugBatch[]>([]);
   const touchedPartKeys = useRef<Set<string>>(new Set());
   const suggestionRequestId = useRef(0);
   const autoSuggestionKey = useRef("");
@@ -1670,7 +1686,11 @@ function HostGrading({
     setSuggestionStatus(manual ? "Asking Gemma again..." : "Asking Gemma for suggestions...");
 
     const round = room.currentRound;
-    const response = await request<{ suggestions: GradeSuggestion[] }>("grading:suggest", hostPayload, 30000);
+    const response = await request<{ suggestions: GradeSuggestion[]; debugBatches?: GemmaDebugBatch[] }>(
+      "grading:suggest",
+      hostPayload,
+      30000
+    );
     if (suggestionRequestId.current !== requestId || room.currentRound !== round) {
       return;
     }
@@ -1683,6 +1703,7 @@ function HostGrading({
     }
 
     setSuggestions(response.suggestions);
+    setGemmaDebugBatches(response.debugBatches ?? []);
     applySuggestionCredits(response.suggestions);
     setSuggestionTone("info");
     setSuggestionStatus(
@@ -1739,6 +1760,7 @@ function HostGrading({
     setSuggestionStatus("");
     setSuggestionTone("info");
     setSuggesting(false);
+    setGemmaDebugBatches([]);
     setReviewing(false);
   }, [room.currentRound, partSignature]);
 
@@ -1891,6 +1913,40 @@ function HostGrading({
             })}
           </div>
           {suggestionStatus ? <div className={`status-line ${suggestionTone}`}>{suggestionStatus}</div> : null}
+          {room.settings.showFullGemmaResponse && gemmaDebugBatches.length > 0 ? (
+            <details className="debug-panel">
+              <summary>Gemma Debug Response</summary>
+              <div className="debug-batch-list">
+                {gemmaDebugBatches.map((batch) => (
+                  <section className="debug-batch" key={`${batch.batchIndex}-${batch.teamIds.join(",")}`}>
+                    <div className="question-label">
+                      Batch {batch.batchIndex} of {batch.batchCount} · teams {batch.teamIds.join(", ")}
+                    </div>
+                    <div className="question-label">Prompt</div>
+                    <pre className="question-code debug-code">
+                      <code>{batch.prompt}</code>
+                    </pre>
+                    {batch.modelText ? (
+                      <>
+                        <div className="question-label">Model Text</div>
+                        <pre className="question-code debug-code">
+                          <code>{batch.modelText}</code>
+                        </pre>
+                      </>
+                    ) : null}
+                    {batch.rawResponse ? (
+                      <>
+                        <div className="question-label">Raw Response</div>
+                        <pre className="question-code debug-code">
+                          <code>{batch.rawResponse}</code>
+                        </pre>
+                      </>
+                    ) : null}
+                  </section>
+                ))}
+              </div>
+            </details>
+          ) : null}
           <button className="primary submit-row" disabled={!ready} onClick={() => setReviewing(true)}>
             <Check size={18} />
             Review Grades

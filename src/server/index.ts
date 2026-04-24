@@ -10,6 +10,7 @@ import {
   questionParts,
   type Ack,
   type AnswerRevealMode,
+  type GemmaDebugBatch,
   type GameSettings,
   type Grade,
   type GradeSuggestion,
@@ -63,8 +64,9 @@ type RoomRecord = {
   roundTimer?: NodeJS.Timeout;
   gradeSuggestionCache?: {
     round: number;
-    promise?: Promise<GradeSuggestion[]>;
+    promise?: Promise<{ suggestions: GradeSuggestion[]; debugBatches: GemmaDebugBatch[] }>;
     suggestions?: GradeSuggestion[];
+    debugBatches?: GemmaDebugBatch[];
   };
   history: RoundHistoryEntry[];
   adjustments: ScoreAdjustment[];
@@ -107,7 +109,8 @@ function cloneSettings(settings: GameSettings = DEFAULT_SETTINGS): GameSettings 
     scrambleQuestionOrder: settings.scrambleQuestionOrder,
     answerRevealMode: settings.answerRevealMode,
     hideLeaderboardDuringAnswering: settings.hideLeaderboardDuringAnswering,
-    llmGradingEnabled: settings.llmGradingEnabled
+    llmGradingEnabled: settings.llmGradingEnabled,
+    showFullGemmaResponse: settings.showFullGemmaResponse
   };
 }
 
@@ -673,6 +676,7 @@ function validateSettings(settings: Partial<GameSettings>): GameSettings | strin
   const scrambleQuestionOrder = Boolean(settings.scrambleQuestionOrder);
   const hideLeaderboardDuringAnswering = Boolean(settings.hideLeaderboardDuringAnswering);
   const llmGradingEnabled = Boolean(settings.llmGradingEnabled);
+  const showFullGemmaResponse = Boolean(settings.showFullGemmaResponse);
   const questions = validateQuestions(settings.questions);
 
   if (typeof questions === "string") {
@@ -710,7 +714,8 @@ function validateSettings(settings: Partial<GameSettings>): GameSettings | strin
     scrambleQuestionOrder,
     answerRevealMode: answerRevealMode as AnswerRevealMode,
     hideLeaderboardDuringAnswering,
-    llmGradingEnabled
+    llmGradingEnabled,
+    showFullGemmaResponse
   };
 }
 
@@ -919,8 +924,21 @@ function parseGemmaPartSuggestions(rawParts: unknown, parts: QuestionPart[]): Pa
     const orderedCandidates = [candidate.exactPart, candidate.numberedPart, candidate.normalizedPart]
       .filter((part): part is QuestionPart => Boolean(part))
       .filter((part, index, items) => items.findIndex((item) => item.id === part.id) === index);
+    const nextUnusedPart = parts.find((part) => !suggestionsByPartId.has(part.id));
 
     if (orderedCandidates.length === 0) {
+      if (!nextUnusedPart) {
+        continue;
+      }
+
+      const nextSuggestion: PartGradeSuggestion = {
+        partId: nextUnusedPart.id,
+        credit: candidate.credit,
+        confidence: candidate.confidence,
+        rationale: candidate.rationale,
+        feedback: candidate.feedback
+      };
+      suggestionsByPartId.set(nextUnusedPart.id, nextSuggestion);
       continue;
     }
 
@@ -936,6 +954,10 @@ function parseGemmaPartSuggestions(rawParts: unknown, parts: QuestionPart[]): Pa
       }
     } else {
       chosenPart = orderedCandidates.find((part) => !suggestionsByPartId.has(part.id)) ?? orderedCandidates[0];
+    }
+
+    if (suggestionsByPartId.has(chosenPart.id) && nextUnusedPart) {
+      chosenPart = nextUnusedPart;
     }
 
     const nextSuggestion: PartGradeSuggestion = {
@@ -1060,7 +1082,9 @@ function stringifyForDebug(value: unknown): string {
   }
 }
 
-async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSuggestion[]> {
+async function requestGemmaGradeSuggestions(
+  room: RoomRecord
+): Promise<{ suggestions: GradeSuggestion[]; debugBatches: GemmaDebugBatch[] }> {
   const apiKey = process.env.GEMMA_API_KEY;
   if (!apiKey) {
     throw new Error("GEMMA_API_KEY is not configured.");
@@ -1079,6 +1103,7 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
   }));
   const batchSize = Math.max(1, Math.ceil(teams.length / 15));
   const teamBatches = chunkArray(teams, batchSize);
+  const includeDebug = room.settings.showFullGemmaResponse;
 
   const url = `${apiBase.replace(/\/$/, "")}/${modelPath}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const responseSchema = {
@@ -1166,7 +1191,7 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
   async function postGemma(
     prompt: string,
     includeSchema: boolean
-  ): Promise<{ ok: true; data: unknown } | { ok: false; status: number; text: string }> {
+  ): Promise<{ ok: true; data: unknown; rawText: string } | { ok: false; status: number; text: string }> {
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -1193,7 +1218,7 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
     }
 
     try {
-      return { ok: true, data: JSON.parse(text) as unknown };
+      return { ok: true, data: JSON.parse(text) as unknown, rawText: text };
     } catch {
       throw new Error(`Gemma response was not valid JSON.\n\nFull Gemma response:\n${text}`);
     }
@@ -1202,7 +1227,7 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
   async function postGemmaWithRetryForPrompt(
     prompt: string,
     includeSchema: boolean
-  ): Promise<{ ok: true; data: unknown } | { ok: false; status: number; text: string }> {
+  ): Promise<{ ok: true; data: unknown; rawText: string } | { ok: false; status: number; text: string }> {
     const delays = [700, 1600];
 
     for (let attempt = 0; attempt <= delays.length; attempt += 1) {
@@ -1218,6 +1243,7 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
   }
 
   const allSuggestions: GradeSuggestion[] = [];
+  const debugBatches: GemmaDebugBatch[] = [];
   for (const [batchIndex, batchTeams] of teamBatches.entries()) {
     const validTeamIds = new Set(batchTeams.map((team) => team.teamId));
     const prompt = buildPrompt(batchTeams, batchIndex, teamBatches.length);
@@ -1245,7 +1271,18 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
     }
 
     try {
-      allSuggestions.push(...parseGemmaSuggestions(text, validTeamIds, parts));
+      const parsedSuggestions = parseGemmaSuggestions(text, validTeamIds, parts);
+      allSuggestions.push(...parsedSuggestions);
+      if (includeDebug) {
+        debugBatches.push({
+          batchIndex: batchIndex + 1,
+          batchCount: teamBatches.length,
+          teamIds: batchTeams.map((team) => team.teamId),
+          prompt,
+          modelText: text,
+          rawResponse: result.rawText
+        });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not parse Gemma suggestions.";
       throw new Error(
@@ -1254,14 +1291,22 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
     }
   }
 
-  return allSuggestions;
+  return {
+    suggestions: allSuggestions,
+    debugBatches
+  };
 }
 
-async function cachedGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSuggestion[]> {
+async function cachedGemmaGradeSuggestions(
+  room: RoomRecord
+): Promise<{ suggestions: GradeSuggestion[]; debugBatches: GemmaDebugBatch[] }> {
   const cached = room.gradeSuggestionCache;
   if (cached?.round === room.currentRound) {
     if (cached.suggestions) {
-      return cached.suggestions;
+      return {
+        suggestions: cached.suggestions,
+        debugBatches: cached.debugBatches ?? []
+      };
     }
 
     if (cached.promise) {
@@ -1274,11 +1319,15 @@ async function cachedGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugge
   room.gradeSuggestionCache = { round, promise };
 
   try {
-    const suggestions = await promise;
+    const result = await promise;
     if (room.gradeSuggestionCache?.round === round && room.currentRound === round) {
-      room.gradeSuggestionCache = { round, suggestions };
+      room.gradeSuggestionCache = {
+        round,
+        suggestions: result.suggestions,
+        debugBatches: result.debugBatches
+      };
     }
-    return suggestions;
+    return result;
   } catch (error) {
     if (room.gradeSuggestionCache?.round === round && room.gradeSuggestionCache.promise === promise) {
       room.gradeSuggestionCache = undefined;
@@ -1293,8 +1342,8 @@ async function gradeSuggestionsForFinalResults(room: RoomRecord): Promise<Map<st
   }
 
   try {
-    const suggestions = await cachedGemmaGradeSuggestions(room);
-    return new Map(suggestions.map((suggestion) => [suggestion.teamId, suggestion]));
+    const result = await cachedGemmaGradeSuggestions(room);
+    return new Map(result.suggestions.map((suggestion) => [suggestion.teamId, suggestion]));
   } catch {
     return new Map();
   }
@@ -1977,7 +2026,10 @@ io.on("connection", (socket) => {
 
   socket.on(
     "grading:suggest",
-    async (payload: { code?: unknown; hostToken?: unknown }, ack?: AckCallback<{ suggestions: GradeSuggestion[] }>) => {
+    async (
+      payload: { code?: unknown; hostToken?: unknown },
+      ack?: AckCallback<{ suggestions: GradeSuggestion[]; debugBatches?: GemmaDebugBatch[] }>
+    ) => {
       const room = requireHost(socket, ack, payload);
       if (!room) {
         return;
@@ -1999,8 +2051,11 @@ io.on("connection", (socket) => {
           await wait(graceRemaining);
         }
 
-        const suggestions = await cachedGemmaGradeSuggestions(room);
-        ok(ack, { suggestions });
+        const result = await cachedGemmaGradeSuggestions(room);
+        ok(ack, {
+          suggestions: result.suggestions,
+          debugBatches: room.settings.showFullGemmaResponse ? result.debugBatches : undefined
+        });
       } catch (error) {
         fail(socket, ack, error instanceof Error ? error.message : "Could not get AI grade suggestions.");
       }

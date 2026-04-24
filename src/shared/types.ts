@@ -22,6 +22,15 @@ export type GradeSuggestion = {
   partSuggestions?: PartGradeSuggestion[];
 };
 
+export type GemmaDebugBatch = {
+  batchIndex: number;
+  batchCount: number;
+  teamIds: string[];
+  prompt: string;
+  modelText?: string;
+  rawResponse?: string;
+};
+
 export type AnswerRevealMode = "host_only" | "after_grading" | "status_only";
 
 export type GameSettings = {
@@ -33,6 +42,7 @@ export type GameSettings = {
   answerRevealMode: AnswerRevealMode;
   hideLeaderboardDuringAnswering: boolean;
   llmGradingEnabled: boolean;
+  showFullGemmaResponse: boolean;
 };
 
 export type Question = {
@@ -177,7 +187,8 @@ export const DEFAULT_SETTINGS: GameSettings = {
   scrambleQuestionOrder: false,
   answerRevealMode: "host_only",
   hideLeaderboardDuringAnswering: false,
-  llmGradingEnabled: false
+  llmGradingEnabled: false,
+  showFullGemmaResponse: false
 };
 
 export const SINGLE_PART_ID = "main";
