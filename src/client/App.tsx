@@ -2466,6 +2466,16 @@ function TeamAnswer({
   const [answer, setAnswer] = useState("");
   const [status, setStatus] = useState("");
 
+  useEffect(() => {
+    setAnswer(team.currentAnswerDraft ?? team.currentAnswer ?? "");
+    setStatus("");
+  }, [room.currentRound, team.currentAnswer, team.currentAnswerDraft]);
+
+  function updateAnswer(nextAnswer: string): void {
+    setAnswer(nextAnswer);
+    void request("answer:draft", { ...teamPayload, answer: nextAnswer }, 3000);
+  }
+
   async function submitAnswer(): Promise<void> {
     const response = await request("answer:submit", { ...teamPayload, answer });
     if (!response.ok) {
@@ -2487,7 +2497,7 @@ function TeamAnswer({
         <div className="locked-answer">{team.currentAnswer}</div>
       ) : (
         <>
-          <textarea value={answer} onChange={(event) => setAnswer(event.target.value)} maxLength={1000} />
+          <textarea value={answer} onChange={(event) => updateAnswer(event.target.value)} maxLength={1000} />
           <button className="primary submit-row" disabled={!answer.trim()} onClick={submitAnswer}>
             <Send size={18} />
             Submit Answer

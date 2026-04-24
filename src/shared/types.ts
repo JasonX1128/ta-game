@@ -123,6 +123,7 @@ export type PublicTeam = {
   wagerLocked: boolean;
   hasSubmittedAnswer: boolean;
   currentAnswer?: string;
+  currentAnswerDraft?: string;
   currentGrade?: Grade;
   correctWagerTotal: number;
   answerPoints: number;

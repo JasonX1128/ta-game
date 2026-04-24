@@ -41,6 +41,7 @@ type TeamRecord = {
   usedWagers: Set<number>;
   currentWager?: number;
   currentAnswer?: string;
+  currentAnswerDraft?: string;
   currentGrade?: Grade;
   correctWagerTotal: number;
   answerPoints: number;
@@ -87,6 +88,7 @@ const io = new Server(httpServer, {
 
 const rooms = new Map<string, RoomRecord>();
 const connections = new Map<string, SocketContext>();
+const DRAFT_GRACE_MS = 500;
 
 function cloneSettings(settings: GameSettings = DEFAULT_SETTINGS): GameSettings {
   return {
@@ -253,6 +255,7 @@ function publicState(room: RoomRecord, context: SocketContext): PublicRoomState 
   const teams: PublicTeam[] = room.teams.map((team) => {
     const entry = leaderboardByTeam.get(team.id);
     const canSeeAnswer = context.role === "host" || context.teamId === team.id;
+    const canSeeDraft = context.teamId === team.id;
 
     return {
       id: team.id,
@@ -264,6 +267,7 @@ function publicState(room: RoomRecord, context: SocketContext): PublicRoomState 
       wagerLocked: team.currentWager !== undefined,
       hasSubmittedAnswer: team.currentAnswer !== undefined,
       currentAnswer: canSeeAnswer ? team.currentAnswer : undefined,
+      currentAnswerDraft: canSeeDraft ? team.currentAnswerDraft : undefined,
       currentGrade: canSeeAnswer ? team.currentGrade : undefined,
       correctWagerTotal: adjustedScore(team),
       answerPoints: team.answerPoints,
@@ -1204,13 +1208,33 @@ function clearRoundTimer(room: RoomRecord): void {
   }
 }
 
+function promoteAnswerDrafts(room: RoomRecord): void {
+  for (const team of room.teams) {
+    if (team.currentAnswer !== undefined) {
+      continue;
+    }
+
+    const draft = team.currentAnswerDraft;
+    if (draft?.trim()) {
+      team.currentAnswer = draft;
+    }
+  }
+}
+
 function moveToGrading(room: RoomRecord): void {
   clearRoundTimer(room);
+  promoteAnswerDrafts(room);
   room.phase = "grading";
   room.roundEndsAt = Date.now();
   room.gradeSuggestionCache = undefined;
   if (room.settings.llmGradingEnabled) {
-    void cachedGemmaGradeSuggestions(room).catch(() => undefined);
+    const round = room.currentRound;
+    const timer = setTimeout(() => {
+      if (room.phase === "grading" && room.currentRound === round && room.settings.llmGradingEnabled) {
+        void cachedGemmaGradeSuggestions(room).catch(() => undefined);
+      }
+    }, DRAFT_GRACE_MS);
+    timer.unref?.();
   }
   touch(room);
 }
@@ -1248,6 +1272,7 @@ function resetCurrentRoundFields(room: RoomRecord): void {
   for (const team of room.teams) {
     team.currentWager = undefined;
     team.currentAnswer = undefined;
+    team.currentAnswerDraft = undefined;
     team.currentGrade = undefined;
   }
 }
@@ -1263,6 +1288,7 @@ function resetGame(room: RoomRecord): void {
     team.usedWagers.clear();
     team.currentWager = undefined;
     team.currentAnswer = undefined;
+    team.currentAnswerDraft = undefined;
     team.currentGrade = undefined;
     team.correctWagerTotal = 0;
     team.answerPoints = 0;
@@ -1473,6 +1499,7 @@ io.on("connection", (socket) => {
       team.usedWagers.clear();
       team.currentWager = undefined;
       team.currentAnswer = undefined;
+      team.currentAnswerDraft = undefined;
       team.currentGrade = undefined;
       team.correctWagerTotal = 0;
       team.answerPoints = 0;
@@ -1663,6 +1690,7 @@ io.on("connection", (socket) => {
 
       for (const team of room.teams) {
         team.currentAnswer = undefined;
+        team.currentAnswerDraft = undefined;
         team.currentGrade = undefined;
       }
 
@@ -1688,6 +1716,53 @@ io.on("connection", (socket) => {
     ok(ack, {});
     broadcastState(room);
   });
+
+  socket.on(
+    "answer:draft",
+    (payload: { code?: unknown; teamToken?: unknown; answer?: unknown }, ack?: AckCallback) => {
+      const result = requireTeam(socket, ack, payload);
+      if (!result) {
+        return;
+      }
+
+      const { room, team } = result;
+      const answer = String(payload.answer ?? "");
+      if (answer.length > 1000) {
+        fail(socket, ack, "Answer must be 1000 characters or fewer.");
+        return;
+      }
+
+      if (team.currentAnswer !== undefined) {
+        ok(ack, {});
+        return;
+      }
+
+      if (room.phase === "answering") {
+        team.currentAnswerDraft = answer;
+        touch(room);
+        ok(ack, {});
+        return;
+      }
+
+      const justStopped = room.phase === "grading" && Date.now() - (room.roundEndsAt ?? 0) <= 1500;
+      if (justStopped) {
+        team.currentAnswerDraft = answer;
+        if (answer.trim()) {
+          team.currentAnswer = answer;
+          room.gradeSuggestionCache = undefined;
+          if (room.settings.llmGradingEnabled) {
+            void cachedGemmaGradeSuggestions(room).catch(() => undefined);
+          }
+          touch(room);
+          ok(ack, {});
+          broadcastState(room);
+          return;
+        }
+      }
+
+      ok(ack, {});
+    }
+  );
 
   socket.on(
     "answer:submit",
@@ -1727,6 +1802,7 @@ io.on("connection", (socket) => {
       }
 
       team.currentAnswer = answer;
+      team.currentAnswerDraft = answer;
 
       if (room.teams.every((candidate) => candidate.currentAnswer !== undefined)) {
         moveToGrading(room);
@@ -1758,6 +1834,11 @@ io.on("connection", (socket) => {
       }
 
       try {
+        const graceRemaining = DRAFT_GRACE_MS - (Date.now() - (room.roundEndsAt ?? 0));
+        if (graceRemaining > 0) {
+          await wait(graceRemaining);
+        }
+
         const suggestions = await cachedGemmaGradeSuggestions(room);
         ok(ack, { suggestions });
       } catch (error) {
