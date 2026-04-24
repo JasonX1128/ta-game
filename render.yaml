@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: ta-game
+    env: node
+    plan: free
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
