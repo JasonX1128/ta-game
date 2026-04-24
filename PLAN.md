@@ -52,6 +52,13 @@ Editable in the lobby before the game starts:
   - If there are fewer teams than bonus entries, unused entries are ignored.
   - If there are more teams than bonus entries, lower-ranked teams get `+0`.
 
+- **Question upload**
+  - Optional JSON upload with a `questions` array.
+  - Each question requires `text`.
+  - Each question can include optional `code`, `codeLanguage`, and `image`.
+  - If questions are uploaded, `N` is set to the number of uploaded questions.
+  - A folder upload can include `questions.json` plus images referenced by filename or named by question number.
+
 ## Scoring Interpretation
 
 Confirmed rule:
@@ -92,6 +99,7 @@ Confirmed rule:
 
 4. **Answer Phase**
    - Timer starts.
+   - Current question is displayed.
    - Teams enter answers.
    - Answers lock when submitted, when time expires, or when the host stops the timer early.
    - Host sees submitted answers live.
@@ -216,6 +224,9 @@ type Room = {
 - Settings can only change in lobby.
 - `questionCount` must be a positive integer.
 - `pointsPerCorrect` must be a non-negative number from 0 to 100000.
+- Uploaded question text is required for each question.
+- Uploaded code blocks and images are optional.
+- Uploaded question count controls `questionCount`.
 - Wagers must be integers from `1..N`.
 - A team cannot reuse a wager.
 - A team cannot submit/change wager after answer phase starts.

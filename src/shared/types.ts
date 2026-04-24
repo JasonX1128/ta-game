@@ -14,6 +14,16 @@ export type GameSettings = {
   questionCount: number;
   pointsPerCorrect: number;
   bonusByRank: number[];
+  questions: Question[];
+};
+
+export type Question = {
+  text: string;
+  code?: string;
+  codeLanguage?: string;
+  imageDataUrl?: string;
+  imageName?: string;
+  imageAlt?: string;
 };
 
 export type PublicTeam = {
@@ -63,5 +73,6 @@ export type Ack<T extends object = Record<string, never>> = AckOk<T> | AckError;
 export const DEFAULT_SETTINGS: GameSettings = {
   questionCount: 5,
   pointsPerCorrect: 10,
-  bonusByRank: [10, 5, 2]
+  bonusByRank: [10, 5, 2],
+  questions: []
 };

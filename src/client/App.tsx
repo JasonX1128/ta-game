@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { io, Socket } from "socket.io-client";
-import type { Ack, GameSettings, Grade, PublicRoomState, PublicTeam, Role } from "../shared/types";
+import type { Ack, GameSettings, Grade, PublicRoomState, PublicTeam, Question, Role } from "../shared/types";
 
 type SavedSession = {
   code: string;
@@ -80,6 +80,154 @@ function parseBonusText(value: string): number[] | null {
     .map((item) => Number(item));
 
   return parsed.every((item) => Number.isInteger(item) && item >= 0) ? parsed : null;
+}
+
+function readFileAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.readAsText(file);
+  });
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.readAsDataURL(file);
+  });
+}
+
+function normalizeUploadPath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
+}
+
+function basename(path: string): string {
+  return normalizeUploadPath(path).split("/").pop() ?? path.toLowerCase();
+}
+
+function isImageFile(file: File): boolean {
+  return file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp)$/i.test(file.name);
+}
+
+function makeFileLookup(files: File[]): Map<string, File> {
+  const lookup = new Map<string, File>();
+
+  for (const file of files) {
+    const relativePath = normalizeUploadPath(file.webkitRelativePath || file.name);
+    lookup.set(relativePath, file);
+    lookup.set(basename(relativePath), file);
+  }
+
+  return lookup;
+}
+
+function findQuestionJson(files: File[]): File | undefined {
+  return (
+    files.find((file) => basename(file.webkitRelativePath || file.name) === "questions.json") ??
+    files.find((file) => /\.json$/i.test(file.name))
+  );
+}
+
+function imageCandidates(index: number): string[] {
+  const questionNumber = index + 1;
+  const stems = [`q${questionNumber}`, `${questionNumber}`, `question${questionNumber}`, `question-${questionNumber}`];
+  const extensions = ["png", "jpg", "jpeg", "webp", "gif"];
+
+  return stems.flatMap((stem) => extensions.map((extension) => `${stem}.${extension}`));
+}
+
+async function parseQuestionUpload(fileList: FileList | null): Promise<Question[]> {
+  const files = Array.from(fileList ?? []);
+  if (files.length === 0) {
+    throw new Error("Choose a questions.json file or a question folder.");
+  }
+
+  const jsonFile = findQuestionJson(files);
+  if (!jsonFile) {
+    throw new Error("Upload needs a questions.json file.");
+  }
+
+  const parsed = JSON.parse(await readFileAsText(jsonFile)) as unknown;
+  const rawQuestions = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === "object" && Array.isArray((parsed as { questions?: unknown }).questions)
+      ? (parsed as { questions: unknown[] }).questions
+      : null;
+
+  if (!rawQuestions || rawQuestions.length === 0) {
+    throw new Error("questions.json needs a non-empty questions array.");
+  }
+
+  const lookup = makeFileLookup(files.filter((file) => file !== jsonFile));
+  const questions: Question[] = [];
+
+  for (const [index, rawQuestion] of rawQuestions.entries()) {
+    if (!rawQuestion || typeof rawQuestion !== "object") {
+      throw new Error(`Question ${index + 1} must be an object.`);
+    }
+
+    const candidate = rawQuestion as {
+      text?: unknown;
+      code?: unknown;
+      codeLanguage?: unknown;
+      language?: unknown;
+      image?: unknown;
+      imageName?: unknown;
+      imageAlt?: unknown;
+    };
+    const text = typeof candidate.text === "string" ? candidate.text.trim() : "";
+    const code = typeof candidate.code === "string" ? candidate.code : undefined;
+    const codeLanguage =
+      typeof candidate.codeLanguage === "string"
+        ? candidate.codeLanguage
+        : typeof candidate.language === "string"
+          ? candidate.language
+          : undefined;
+    const imageReference =
+      typeof candidate.image === "string"
+        ? candidate.image
+        : typeof candidate.imageName === "string"
+          ? candidate.imageName
+          : undefined;
+
+    if (!text) {
+      throw new Error(`Question ${index + 1} needs text.`);
+    }
+
+    let imageFile: File | undefined;
+    if (imageReference) {
+      imageFile = lookup.get(normalizeUploadPath(imageReference)) ?? lookup.get(basename(imageReference));
+      if (!imageFile) {
+        throw new Error(`Question ${index + 1} references ${imageReference}, but that image was not uploaded.`);
+      }
+    } else {
+      imageFile = imageCandidates(index)
+        .map((candidateName) => lookup.get(candidateName))
+        .find((file): file is File => Boolean(file));
+    }
+
+    if (imageFile && !isImageFile(imageFile)) {
+      throw new Error(`${imageFile.name} is not a supported image file.`);
+    }
+
+    if (imageFile && imageFile.size > 2_500_000) {
+      throw new Error(`${imageFile.name} is too large. Keep question images under 2.5 MB.`);
+    }
+
+    questions.push({
+      text,
+      code,
+      codeLanguage: codeLanguage?.trim() || undefined,
+      imageDataUrl: imageFile ? await readFileAsDataUrl(imageFile) : undefined,
+      imageName: imageFile?.name,
+      imageAlt: typeof candidate.imageAlt === "string" ? candidate.imageAlt : undefined
+    });
+  }
+
+  return questions;
 }
 
 function formatClock(ms: number): string {
@@ -340,6 +488,8 @@ function HostLobby({
   const [pointsPerCorrect, setPointsPerCorrect] = useState(String(room.settings.pointsPerCorrect));
   const [bonusText, setBonusText] = useState(room.settings.bonusByRank.join(","));
   const [status, setStatus] = useState("");
+  const [uploadStatus, setUploadStatus] = useState("");
+  const uploadedQuestionCount = room.settings.questions.length;
 
   useEffect(() => {
     setQuestionCount(String(room.settings.questionCount));
@@ -356,13 +506,61 @@ function HostLobby({
     }
 
     const settings: GameSettings = {
-      questionCount: Number(questionCount),
+      questionCount: uploadedQuestionCount || Number(questionCount),
       pointsPerCorrect: Number(pointsPerCorrect),
-      bonusByRank
+      bonusByRank,
+      questions: room.settings.questions
     };
 
     const response = await request("settings:update", { ...hostPayload, settings });
     setStatus(response.ok ? "Settings saved." : response.message);
+  }
+
+  async function uploadQuestions(fileList: FileList | null): Promise<void> {
+    setUploadStatus("Reading upload...");
+
+    try {
+      const questions = await parseQuestionUpload(fileList);
+      const bonusByRank = parseBonusText(bonusText);
+      if (!bonusByRank) {
+        setUploadStatus("Bonus list needs comma-separated whole numbers.");
+        return;
+      }
+
+      const response = await request("settings:update", {
+        ...hostPayload,
+        settings: {
+          questionCount: questions.length,
+          pointsPerCorrect: Number(pointsPerCorrect),
+          bonusByRank,
+          questions
+        } satisfies GameSettings
+      });
+
+      setUploadStatus(response.ok ? `Loaded ${questions.length} questions.` : response.message);
+    } catch (error) {
+      setUploadStatus(error instanceof Error ? error.message : "Could not read question upload.");
+    }
+  }
+
+  async function clearQuestions(): Promise<void> {
+    const bonusByRank = parseBonusText(bonusText);
+    if (!bonusByRank) {
+      setUploadStatus("Bonus list needs comma-separated whole numbers.");
+      return;
+    }
+
+    const response = await request("settings:update", {
+      ...hostPayload,
+      settings: {
+        questionCount: Math.max(1, Number(questionCount) || room.settings.questionCount),
+        pointsPerCorrect: Number(pointsPerCorrect),
+        bonusByRank,
+        questions: []
+      } satisfies GameSettings
+    });
+
+    setUploadStatus(response.ok ? "Questions cleared." : response.message);
   }
 
   async function startGame(): Promise<void> {
@@ -402,6 +600,7 @@ function HostLobby({
                 min={1}
                 max={30}
                 value={questionCount}
+                disabled={uploadedQuestionCount > 0}
                 onChange={(event) => setQuestionCount(event.target.value)}
               />
             </label>
@@ -419,6 +618,45 @@ function HostLobby({
               Rank bonuses
               <input value={bonusText} onChange={(event) => setBonusText(event.target.value)} />
             </label>
+          </div>
+          <div className="upload-panel">
+            <div>
+              <div className="upload-title">Questions</div>
+              <div className="upload-count">
+                {uploadedQuestionCount > 0 ? `${uploadedQuestionCount} loaded` : "No uploaded questions"}
+              </div>
+            </div>
+            <div className="upload-actions">
+              <label className="file-button">
+                File
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={(event) => {
+                    void uploadQuestions(event.currentTarget.files);
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </label>
+              <label className="file-button">
+                Folder
+                <input
+                  type="file"
+                  multiple
+                  accept=".json,application/json,image/png,image/jpeg,image/gif,image/webp"
+                  onChange={(event) => {
+                    void uploadQuestions(event.currentTarget.files);
+                    event.currentTarget.value = "";
+                  }}
+                  {...{ webkitdirectory: "", directory: "" }}
+                />
+              </label>
+              <button className="secondary" type="button" disabled={uploadedQuestionCount === 0} onClick={clearQuestions}>
+                <RotateCcw size={18} />
+                Clear
+              </button>
+            </div>
+            {uploadStatus ? <div className="status-line span-2">{uploadStatus}</div> : null}
           </div>
           <div className="action-row">
             <button className="secondary" type="submit">
@@ -481,6 +719,34 @@ function GameFrame({ room, children }: { room: PublicRoomState; children: React.
       </div>
       <Leaderboard room={room} />
     </section>
+  );
+}
+
+function currentQuestion(room: PublicRoomState): Question | undefined {
+  return room.settings.questions[room.currentRound - 1];
+}
+
+function QuestionCard({ question, round }: { question?: Question; round: number }) {
+  if (!question) {
+    return null;
+  }
+
+  return (
+    <article className="question-card">
+      <div className="question-label">Question {round}</div>
+      <div className="question-text">{question.text}</div>
+      {question.imageDataUrl ? (
+        <img className="question-image" src={question.imageDataUrl} alt={question.imageAlt || question.imageName || ""} />
+      ) : null}
+      {question.code ? (
+        <div className="question-code-wrap">
+          {question.codeLanguage ? <div className="code-label">{question.codeLanguage}</div> : null}
+          <pre className="question-code">
+            <code>{question.code}</code>
+          </pre>
+        </div>
+      ) : null}
+    </article>
   );
 }
 
@@ -580,6 +846,7 @@ function HostAnswering({
 
   return (
     <div className="flow-panel">
+      <QuestionCard question={currentQuestion(room)} round={room.currentRound} />
       <div className="round-toolbar">
         <TimerDisplay endsAt={room.roundEndsAt} />
         <button className="secondary" onClick={stopTimer}>
@@ -626,6 +893,7 @@ function HostGrading({
 
   return (
     <div className="flow-panel">
+      <QuestionCard question={currentQuestion(room)} round={room.currentRound} />
       <div className="answer-list">
         {room.teams.map((team) => (
           <div className="grade-row" key={team.id}>
@@ -856,6 +1124,7 @@ function TeamAnswer({
         </div>
         <TimerDisplay endsAt={room.roundEndsAt} />
       </div>
+      <QuestionCard question={currentQuestion(room)} round={room.currentRound} />
       {team.hasSubmittedAnswer ? (
         <div className="locked-answer">{team.currentAnswer}</div>
       ) : (

@@ -10,6 +10,7 @@ import {
   type GameSettings,
   type Grade,
   type LeaderboardEntry,
+  type Question,
   type PublicRoomState,
   type PublicTeam,
   type Role
@@ -60,6 +61,7 @@ const clientDist = path.resolve(__dirname, "../client");
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
+  maxHttpBufferSize: 15_000_000,
   cors: {
     origin: true,
     credentials: true
@@ -73,7 +75,8 @@ function cloneSettings(settings: GameSettings = DEFAULT_SETTINGS): GameSettings 
   return {
     questionCount: settings.questionCount,
     pointsPerCorrect: settings.pointsPerCorrect,
-    bonusByRank: [...settings.bonusByRank]
+    bonusByRank: [...settings.bonusByRank],
+    questions: settings.questions.map((question) => ({ ...question }))
   };
 }
 
@@ -294,12 +297,98 @@ function requireTeam<T extends object>(
   return { room, team };
 }
 
+function validateQuestion(rawQuestion: unknown, index: number): Question | string {
+  if (!rawQuestion || typeof rawQuestion !== "object") {
+    return `Question ${index + 1} must be an object.`;
+  }
+
+  const candidate = rawQuestion as Partial<Question>;
+  const text = String(candidate.text ?? "").trim();
+  const code = typeof candidate.code === "string" ? candidate.code : undefined;
+  const codeLanguage =
+    typeof candidate.codeLanguage === "string" ? candidate.codeLanguage.trim().slice(0, 32) : undefined;
+  const imageDataUrl = typeof candidate.imageDataUrl === "string" ? candidate.imageDataUrl : undefined;
+  const imageName = typeof candidate.imageName === "string" ? candidate.imageName.trim().slice(0, 140) : undefined;
+  const imageAlt = typeof candidate.imageAlt === "string" ? candidate.imageAlt.trim().slice(0, 180) : undefined;
+
+  if (!text) {
+    return `Question ${index + 1} needs text.`;
+  }
+
+  if (text.length > 5000) {
+    return `Question ${index + 1} text must be 5000 characters or fewer.`;
+  }
+
+  if (code && code.length > 20000) {
+    return `Question ${index + 1} code must be 20000 characters or fewer.`;
+  }
+
+  if (imageDataUrl) {
+    if (!/^data:image\/(png|jpe?g|gif|webp);base64,/i.test(imageDataUrl)) {
+      return `Question ${index + 1} image must be a PNG, JPG, GIF, or WebP data URL.`;
+    }
+
+    if (imageDataUrl.length > 4_000_000) {
+      return `Question ${index + 1} image is too large.`;
+    }
+  }
+
+  return {
+    text,
+    code: code || undefined,
+    codeLanguage: codeLanguage || undefined,
+    imageDataUrl,
+    imageName,
+    imageAlt
+  };
+}
+
+function validateQuestions(rawQuestions: unknown): Question[] | string {
+  if (rawQuestions === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(rawQuestions)) {
+    return "Questions must be an array.";
+  }
+
+  if (rawQuestions.length > 30) {
+    return "Question uploads cannot contain more than 30 questions.";
+  }
+
+  const questions: Question[] = [];
+  let totalImageBytes = 0;
+
+  for (const [index, rawQuestion] of rawQuestions.entries()) {
+    const question = validateQuestion(rawQuestion, index);
+    if (typeof question === "string") {
+      return question;
+    }
+
+    totalImageBytes += question.imageDataUrl?.length ?? 0;
+    questions.push(question);
+  }
+
+  if (totalImageBytes > 12_000_000) {
+    return "Uploaded question images are too large in total.";
+  }
+
+  return questions;
+}
+
 function validateSettings(settings: Partial<GameSettings>): GameSettings | string {
   const questionCount = Number(settings.questionCount);
   const pointsPerCorrect = Number(settings.pointsPerCorrect);
   const bonusByRank = Array.isArray(settings.bonusByRank) ? settings.bonusByRank : [];
+  const questions = validateQuestions(settings.questions);
 
-  if (!Number.isInteger(questionCount) || questionCount < 1 || questionCount > 30) {
+  if (typeof questions === "string") {
+    return questions;
+  }
+
+  const nextQuestionCount = questions.length > 0 ? questions.length : questionCount;
+
+  if (!Number.isInteger(nextQuestionCount) || nextQuestionCount < 1 || nextQuestionCount > 30) {
     return "Number of questions must be a whole number from 1 to 30.";
   }
 
@@ -317,9 +406,10 @@ function validateSettings(settings: Partial<GameSettings>): GameSettings | strin
   }
 
   return {
-    questionCount,
+    questionCount: nextQuestionCount,
     pointsPerCorrect,
-    bonusByRank: parsedBonuses
+    bonusByRank: parsedBonuses,
+    questions
   };
 }
 
