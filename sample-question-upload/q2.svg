@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="360" viewBox="0 0 720 360" role="img" aria-labelledby="title desc">
+  <title id="title">Async Task Timeline</title>
+  <desc id="desc">Three tasks start together but finish in a different order.</desc>
+  <rect width="720" height="360" fill="#fbfaf5"/>
+  <line x1="90" y1="92" x2="650" y2="92" stroke="#d9ded8" stroke-width="5"/>
+  <line x1="90" y1="180" x2="650" y2="180" stroke="#d9ded8" stroke-width="5"/>
+  <line x1="90" y1="268" x2="650" y2="268" stroke="#d9ded8" stroke-width="5"/>
+  <text x="62" y="100" text-anchor="end" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#1d2430">A</text>
+  <text x="62" y="188" text-anchor="end" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#1d2430">B</text>
+  <text x="62" y="276" text-anchor="end" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#1d2430">C</text>
+  <circle cx="110" cy="92" r="12" fill="#2d5f8b"/>
+  <circle cx="110" cy="180" r="12" fill="#2d5f8b"/>
+  <circle cx="110" cy="268" r="12" fill="#2d5f8b"/>
+  <rect x="110" y="80" width="420" height="24" rx="12" fill="#dfeaf5"/>
+  <rect x="110" y="168" width="240" height="24" rx="12" fill="#dff1e9"/>
+  <rect x="110" y="256" width="330" height="24" rx="12" fill="#f7e4bf"/>
+  <circle cx="530" cy="92" r="15" fill="#2d5f8b"/>
+  <circle cx="350" cy="180" r="15" fill="#1f7a5c"/>
+  <circle cx="440" cy="268" r="15" fill="#c37b22"/>
+  <text x="530" y="58" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#2d5f8b">finishes 3rd</text>
+  <text x="350" y="146" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#1f7a5c">finishes 1st</text>
+  <text x="440" y="234" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#9a641f">finishes 2nd</text>
+  <text x="380" y="330" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" fill="#667085">Started together, resolved separately</text>
+</svg>

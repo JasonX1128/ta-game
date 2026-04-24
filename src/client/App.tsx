@@ -109,7 +109,7 @@ function basename(path: string): string {
 }
 
 function isImageFile(file: File): boolean {
-  return file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp)$/i.test(file.name);
+  return file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/i.test(file.name);
 }
 
 function makeFileLookup(files: File[]): Map<string, File> {
@@ -134,7 +134,7 @@ function findQuestionJson(files: File[]): File | undefined {
 function imageCandidates(index: number): string[] {
   const questionNumber = index + 1;
   const stems = [`q${questionNumber}`, `${questionNumber}`, `question${questionNumber}`, `question-${questionNumber}`];
-  const extensions = ["png", "jpg", "jpeg", "webp", "gif"];
+  const extensions = ["png", "jpg", "jpeg", "webp", "gif", "svg"];
 
   return stems.flatMap((stem) => extensions.map((extension) => `${stem}.${extension}`));
 }
@@ -643,7 +643,7 @@ function HostLobby({
                 <input
                   type="file"
                   multiple
-                  accept=".json,application/json,image/png,image/jpeg,image/gif,image/webp"
+                  accept=".json,application/json,image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
                   onChange={(event) => {
                     void uploadQuestions(event.currentTarget.files);
                     event.currentTarget.value = "";

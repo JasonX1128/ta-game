@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="360" viewBox="0 0 720 360" role="img" aria-labelledby="title desc">
+  <title id="title">Average Function Diagram</title>
+  <desc id="desc">Values flow into an average function and return a result.</desc>
+  <rect width="720" height="360" fill="#fbfaf5"/>
+  <rect x="42" y="82" width="176" height="196" rx="14" fill="#e8f2ed" stroke="#1f7a5c" stroke-width="4"/>
+  <text x="130" y="132" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#1d2430">values</text>
+  <text x="130" y="182" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" fill="#1d2430">[4, 6, 8]</text>
+  <text x="130" y="226" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" fill="#1d2430">[]</text>
+  <path d="M236 180h108" stroke="#2d5f8b" stroke-width="8" stroke-linecap="round"/>
+  <path d="M344 180l-24-18v36z" fill="#2d5f8b"/>
+  <rect x="364" y="92" width="194" height="176" rx="14" fill="#ffffff" stroke="#d9ded8" stroke-width="4"/>
+  <text x="461" y="154" text-anchor="middle" font-family="Arial, sans-serif" font-size="23" font-weight="700" fill="#1d2430">average()</text>
+  <text x="461" y="198" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" fill="#667085">sum / length</text>
+  <path d="M578 180h70" stroke="#c37b22" stroke-width="8" stroke-linecap="round"/>
+  <path d="M648 180l-24-18v36z" fill="#c37b22"/>
+  <text x="662" y="230" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#8c2f2d">?</text>
+</svg>

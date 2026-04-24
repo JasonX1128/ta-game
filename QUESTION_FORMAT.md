@@ -27,5 +27,4 @@ Rules:
 - `image` is optional.
 - If using images, upload a folder that contains `questions.json` and the image files.
 - Images can be referenced by filename in `image`, or auto-matched by question number with names like `q1.png`, `1.jpg`, `question1.webp`, or `question-1.png`.
-- Supported image types: PNG, JPG, GIF, WebP.
-
+- Supported image types: PNG, JPG, GIF, WebP, SVG.

@@ -324,8 +324,8 @@ function validateQuestion(rawQuestion: unknown, index: number): Question | strin
   }
 
   if (imageDataUrl) {
-    if (!/^data:image\/(png|jpe?g|gif|webp);base64,/i.test(imageDataUrl)) {
-      return `Question ${index + 1} image must be a PNG, JPG, GIF, or WebP data URL.`;
+    if (!/^data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,/i.test(imageDataUrl)) {
+      return `Question ${index + 1} image must be a PNG, JPG, GIF, WebP, or SVG data URL.`;
     }
 
     if (imageDataUrl.length > 4_000_000) {
