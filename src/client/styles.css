@@ -1,0 +1,657 @@
+:root {
+  color-scheme: light;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f6f3ee;
+  color: #1d2430;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --ink: #1d2430;
+  --muted: #667085;
+  --line: #d9ded8;
+  --surface: #fffdf8;
+  --surface-strong: #ffffff;
+  --green: #1f7a5c;
+  --green-soft: #dff1e9;
+  --blue: #2d5f8b;
+  --amber: #c37b22;
+  --amber-soft: #f7e4bf;
+  --red: #bc3f3b;
+  --red-soft: #f7d9d5;
+  --shadow: 0 12px 35px rgba(41, 50, 65, 0.1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 0;
+}
+
+.app-shell {
+  width: min(1180px, calc(100vw - 32px));
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 24px 0 40px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.brand {
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.connection,
+.eyebrow,
+.muted,
+.score-key {
+  color: var(--muted);
+}
+
+.connection,
+.eyebrow {
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.error-banner,
+.status-line {
+  border: 1px solid var(--red-soft);
+  background: #fff5f2;
+  color: #8c2f2d;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+
+.status-line {
+  margin: 12px 0 0;
+}
+
+.home-grid,
+.lobby-layout,
+.game-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.home-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  align-items: start;
+}
+
+.lobby-layout {
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+
+.game-grid {
+  grid-template-columns: minmax(0, 1fr) 340px;
+  align-items: start;
+}
+
+.entry-panel,
+.settings-panel,
+.lobby-side,
+.waiting-panel,
+.game-main,
+.leaderboard,
+.flow-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.entry-panel,
+.settings-panel,
+.lobby-side,
+.waiting-panel,
+.game-main,
+.leaderboard,
+.flow-panel {
+  padding: 18px;
+}
+
+.lobby-main {
+  display: grid;
+  gap: 18px;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  margin-bottom: 16px;
+}
+
+label {
+  display: grid;
+  gap: 7px;
+  color: #394454;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+input,
+textarea {
+  width: 100%;
+  border: 1px solid #cfd6d2;
+  background: var(--surface-strong);
+  color: var(--ink);
+  border-radius: 6px;
+  padding: 11px 12px;
+  outline: none;
+}
+
+textarea {
+  min-height: 180px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+input:focus,
+textarea:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(45, 95, 139, 0.14);
+}
+
+button {
+  min-height: 42px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 800;
+  transition:
+    transform 120ms ease,
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.primary {
+  background: var(--green);
+  color: white;
+}
+
+.primary:hover:not(:disabled) {
+  background: #17684e;
+}
+
+.secondary {
+  background: #eef2f1;
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+.secondary:hover:not(:disabled) {
+  background: #e4ebe8;
+}
+
+.wide {
+  width: 100%;
+}
+
+.icon-only {
+  width: 42px;
+  min-width: 42px;
+  background: #eef2f1;
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+.icon-text {
+  padding: 0 14px;
+}
+
+.room-code-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.room-code-row strong {
+  display: block;
+  font-size: clamp(2rem, 6vw, 3.6rem);
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.span-2 {
+  grid-column: span 2;
+}
+
+.action-row,
+.round-toolbar,
+.team-round-head,
+.game-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.action-row {
+  margin-top: 16px;
+}
+
+.team-list {
+  display: grid;
+  gap: 8px;
+}
+
+.team-row,
+.leader-row,
+.table-row,
+.answer-row,
+.grade-row {
+  display: grid;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.team-row {
+  grid-template-columns: 1fr;
+  font-weight: 800;
+}
+
+.team-pill,
+.locked-wager,
+.phase,
+.timer,
+.answer-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.86rem;
+  font-weight: 900;
+}
+
+.team-pill {
+  background: var(--green-soft);
+  color: #165d45;
+}
+
+.waiting-panel {
+  width: min(620px, 100%);
+  margin: 0 auto;
+}
+
+.game-main {
+  min-width: 0;
+}
+
+.game-header {
+  margin-bottom: 16px;
+}
+
+h1,
+h2 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+h1 {
+  font-size: clamp(1.35rem, 2.5vw, 2.05rem);
+}
+
+h2 {
+  font-size: 1.3rem;
+}
+
+.phase {
+  background: #e9eef4;
+  color: #294766;
+  white-space: nowrap;
+}
+
+.phase-answering,
+.timer {
+  background: var(--amber-soft);
+  color: #7a4917;
+}
+
+.phase-grading {
+  background: #e9eef4;
+  color: #294766;
+}
+
+.phase-finished {
+  background: var(--green-soft);
+  color: #165d45;
+}
+
+.round-toolbar label {
+  width: min(220px, 100%);
+}
+
+.data-table,
+.answer-list,
+.leader-list {
+  display: grid;
+  gap: 8px;
+}
+
+.data-table {
+  margin-top: 16px;
+}
+
+.table-row {
+  grid-template-columns: minmax(0, 1fr) 86px 110px;
+}
+
+.table-head {
+  min-height: auto;
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.team-name,
+.leader-name {
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.timer {
+  gap: 8px;
+  min-width: 92px;
+  border: 1px solid #edc783;
+}
+
+.timer.urgent {
+  background: var(--red-soft);
+  color: #8c2f2d;
+  border-color: #eab1ab;
+}
+
+.answer-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.answer-chip {
+  background: #edf0ef;
+  color: #52605a;
+}
+
+.answer-chip.done {
+  background: var(--green-soft);
+  color: #165d45;
+}
+
+.grade-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.answer-text,
+.locked-answer {
+  color: #303a47;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.locked-answer {
+  min-height: 120px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.grade-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.grade {
+  width: 42px;
+  min-width: 42px;
+  border: 1px solid var(--line);
+  background: #eef2f1;
+}
+
+.grade.correct.selected {
+  background: var(--green);
+  color: white;
+  border-color: var(--green);
+}
+
+.grade.incorrect.selected {
+  background: var(--red);
+  color: white;
+  border-color: var(--red);
+}
+
+.submit-row {
+  width: 100%;
+  margin-top: 16px;
+}
+
+.centered {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 12px;
+  padding: 42px 18px;
+}
+
+.team-round-head {
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.locked-wager {
+  background: var(--green-soft);
+  color: #165d45;
+}
+
+.wager-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 10px;
+}
+
+.wager-tile {
+  aspect-ratio: 1;
+  min-height: 64px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-size: 1.35rem;
+}
+
+.wager-tile:hover:not(:disabled),
+.wager-tile.selected {
+  background: var(--green);
+  border-color: var(--green);
+  color: white;
+}
+
+.leaderboard {
+  position: sticky;
+  top: 18px;
+}
+
+.leader-row {
+  grid-template-columns: 34px minmax(0, 1fr) auto auto;
+  padding: 10px;
+}
+
+.rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #edf0ef;
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.leader-score {
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.leader-score em {
+  color: var(--green);
+  font-style: normal;
+}
+
+.leader-total {
+  min-width: 42px;
+  text-align: right;
+  color: var(--blue);
+  font-weight: 900;
+}
+
+.score-key {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  font-size: 0.78rem;
+}
+
+.empty-state {
+  color: var(--muted);
+  border: 1px dashed #cbd3ce;
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+}
+
+@media (max-width: 860px) {
+  .app-shell {
+    width: min(100% - 20px, 1180px);
+    padding-top: 14px;
+  }
+
+  .home-grid,
+  .lobby-layout,
+  .game-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .leaderboard {
+    position: static;
+  }
+
+  .settings-grid,
+  .span-2 {
+    grid-template-columns: 1fr;
+    grid-column: auto;
+  }
+
+  .round-toolbar,
+  .action-row,
+  .team-round-head,
+  .game-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .round-toolbar label {
+    width: 100%;
+  }
+
+  .table-row {
+    grid-template-columns: minmax(0, 1fr) 64px 90px;
+  }
+}
+
+@media (max-width: 520px) {
+  .topbar {
+    align-items: flex-start;
+  }
+
+  .entry-panel,
+  .settings-panel,
+  .lobby-side,
+  .waiting-panel,
+  .game-main,
+  .leaderboard,
+  .flow-panel {
+    padding: 14px;
+  }
+
+  .room-code-row {
+    align-items: stretch;
+  }
+
+  .grade-row,
+  .answer-row,
+  .leader-row {
+    grid-template-columns: 1fr;
+  }
+
+  .grade-actions {
+    width: 100%;
+  }
+
+  .grade {
+    flex: 1;
+  }
+
+  .leader-total {
+    text-align: left;
+  }
+}
