@@ -26,6 +26,11 @@
   box-sizing: border-box;
 }
 
+html {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -613,6 +618,7 @@ h2 {
   border-radius: 8px;
   background: #fbfaf5;
   padding: 12px;
+  min-width: 0;
 }
 
 .debug-panel summary {
@@ -624,11 +630,13 @@ h2 {
   display: grid;
   gap: 12px;
   margin-top: 12px;
+  min-width: 0;
 }
 
 .debug-batch {
   border-top: 1px solid var(--line);
   padding-top: 12px;
+  min-width: 0;
 }
 
 .debug-batch:first-child {
@@ -638,6 +646,15 @@ h2 {
 
 .debug-code {
   max-height: 220px;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: auto;
+  margin-top: 4px;
+}
+
+.debug-code code {
+  display: inline-block;
+  min-width: max-content;
 }
 
 .question-code-wrap {
