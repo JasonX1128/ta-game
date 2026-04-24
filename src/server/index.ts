@@ -303,8 +303,8 @@ function validateSettings(settings: Partial<GameSettings>): GameSettings | strin
     return "Number of questions must be a whole number from 1 to 30.";
   }
 
-  if (!Number.isInteger(pointsPerCorrect) || pointsPerCorrect < 0 || pointsPerCorrect > 100000) {
-    return "Points per correct answer must be a whole number from 0 to 100000.";
+  if (!Number.isFinite(pointsPerCorrect) || pointsPerCorrect < 0 || pointsPerCorrect > 100000) {
+    return "Points per correct answer must be a number from 0 to 100000.";
   }
 
   if (bonusByRank.length > 30) {

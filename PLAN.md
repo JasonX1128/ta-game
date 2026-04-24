@@ -44,6 +44,7 @@ Editable in the lobby before the game starts:
 
 - **Points per correct answer**
   - Flat amount awarded whenever a team answer is marked correct.
+  - Can be a decimal value.
 
 - **Top-team wager bonus list**
   - Comma-separated values, e.g. `10,5,2`.
@@ -213,6 +214,7 @@ type Room = {
 - Team names must be non-empty and unique per room.
 - Settings can only change in lobby.
 - `questionCount` must be a positive integer.
+- `pointsPerCorrect` must be a non-negative number from 0 to 100000.
 - Wagers must be integers from `1..N`.
 - A team cannot reuse a wager.
 - A team cannot submit/change wager after answer phase starts.

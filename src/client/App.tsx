@@ -89,6 +89,12 @@ function formatClock(ms: number): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+function formatPoints(value: number): string {
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 3
+  }).format(value);
+}
+
 function wagerValues(count: number): number[] {
   return Array.from({ length: count }, (_item, index) => index + 1);
 }
@@ -404,6 +410,7 @@ function HostLobby({
               <input
                 type="number"
                 min={0}
+                step="any"
                 value={pointsPerCorrect}
                 onChange={(event) => setPointsPerCorrect(event.target.value)}
               />
@@ -879,6 +886,8 @@ function AnswerTable({ teams }: { teams: PublicTeam[] }) {
 }
 
 function Leaderboard({ room }: { room: PublicRoomState }) {
+  const showFinalTotal = room.phase === "finished";
+
   return (
     <aside className="leaderboard">
       <div className="panel-title">
@@ -890,20 +899,27 @@ function Leaderboard({ room }: { room: PublicRoomState }) {
           <div className="empty-state">No teams yet.</div>
         ) : (
           room.leaderboard.map((entry) => (
-            <div className="leader-row" key={entry.teamId}>
+            <div className={showFinalTotal ? "leader-row has-total" : "leader-row"} key={entry.teamId}>
               <span className="rank">{entry.rank}</span>
-              <span className="leader-name">{entry.name}</span>
-              <span className="leader-score">
-                {entry.correctWagerTotal} <em>(+{entry.rankBonus})</em>
+              <span className="leader-name">
+                {entry.name}
+                <small>Correct pts {formatPoints(entry.answerPoints)}</small>
               </span>
-              <span className="leader-total">{entry.finalScore}</span>
+              <span className="leader-score">
+                {formatPoints(entry.correctWagerTotal)} <em>(+{formatPoints(entry.rankBonus)})</em>
+              </span>
+              {showFinalTotal ? <span className="leader-total">{formatPoints(entry.finalScore)}</span> : null}
             </div>
           ))
         )}
       </div>
       <div className="score-key">
-        <span>Wager score (+bonus)</span>
-        <span>Total includes correct-answer points</span>
+        <span>Rank uses correct wager score; rank bonus is in parentheses.</span>
+        <span>
+          {showFinalTotal
+            ? "Final total includes correct-answer points and bonus."
+            : "Correct-answer points only increase on correct grades."}
+        </span>
       </div>
     </aside>
   );

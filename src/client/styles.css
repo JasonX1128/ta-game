@@ -531,8 +531,12 @@ h2 {
 }
 
 .leader-row {
-  grid-template-columns: 34px minmax(0, 1fr) auto auto;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
   padding: 10px;
+}
+
+.leader-row.has-total {
+  grid-template-columns: 34px minmax(0, 1fr) auto auto;
 }
 
 .rank {
@@ -550,6 +554,17 @@ h2 {
 .leader-score {
   font-weight: 900;
   white-space: nowrap;
+}
+
+.leader-name {
+  display: grid;
+  gap: 2px;
+}
+
+.leader-name small {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
 }
 
 .leader-score em {
