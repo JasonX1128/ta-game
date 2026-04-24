@@ -624,6 +624,22 @@ io.on("connection", (socket) => {
     }
   );
 
+  socket.on("round:stopAnswering", (payload: { code?: unknown; hostToken?: unknown }, ack?: AckCallback) => {
+    const room = requireHost(socket, ack, payload);
+    if (!room) {
+      return;
+    }
+
+    if (room.phase !== "answering") {
+      fail(socket, ack, "The answer timer is not running.");
+      return;
+    }
+
+    moveToGrading(room);
+    ok(ack, {});
+    broadcastState(room);
+  });
+
   socket.on(
     "answer:submit",
     (payload: { code?: unknown; teamToken?: unknown; answer?: unknown }, ack?: AckCallback) => {

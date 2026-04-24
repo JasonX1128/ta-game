@@ -498,7 +498,7 @@ function HostGame({
   }
 
   if (room.phase === "answering") {
-    return <HostAnswering room={room} />;
+    return <HostAnswering room={room} request={request} hostPayload={hostPayload} />;
   }
 
   if (room.phase === "grading") {
@@ -560,11 +560,35 @@ function HostRoundSetup({
   );
 }
 
-function HostAnswering({ room }: { room: PublicRoomState }) {
+function HostAnswering({
+  room,
+  request,
+  hostPayload
+}: {
+  room: PublicRoomState;
+  request: RequestFn;
+  hostPayload: { code: string; hostToken: string };
+}) {
+  const [status, setStatus] = useState("");
+
+  async function stopTimer(): Promise<void> {
+    const response = await request("round:stopAnswering", hostPayload);
+    if (!response.ok) {
+      setStatus(response.message);
+    }
+  }
+
   return (
     <div className="flow-panel">
-      <TimerDisplay endsAt={room.roundEndsAt} />
+      <div className="round-toolbar">
+        <TimerDisplay endsAt={room.roundEndsAt} />
+        <button className="secondary" onClick={stopTimer}>
+          <Timer size={18} />
+          Stop Timer
+        </button>
+      </div>
       <AnswerTable teams={room.teams} />
+      {status ? <div className="status-line">{status}</div> : null}
     </div>
   );
 }

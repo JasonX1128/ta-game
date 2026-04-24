@@ -93,8 +93,9 @@ Confirmed rule:
 4. **Answer Phase**
    - Timer starts.
    - Teams enter answers.
-   - Answers lock when submitted or when time expires.
+   - Answers lock when submitted, when time expires, or when the host stops the timer early.
    - Host sees submitted answers live.
+   - Host can stop the timer and move directly to grading.
 
 5. **Grading Phase**
    - Host marks each answer correct/incorrect.
