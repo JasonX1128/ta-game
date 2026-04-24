@@ -608,6 +608,10 @@ function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>): Grad
   });
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSuggestion[]> {
   const apiKey = process.env.GEMMA_API_KEY;
   if (!apiKey) {
@@ -703,13 +707,30 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
     }
   }
 
-  let result = await postGemma(true);
+  async function postGemmaWithRetry(includeSchema: boolean): Promise<
+    { ok: true; data: unknown } | { ok: false; status: number; text: string }
+  > {
+    const delays = [700, 1600];
+
+    for (let attempt = 0; attempt <= delays.length; attempt += 1) {
+      const result = await postGemma(includeSchema);
+      if (result.ok || ![429, 500, 502, 503, 504].includes(result.status) || attempt === delays.length) {
+        return result;
+      }
+
+      await wait(delays[attempt]);
+    }
+
+    return postGemma(includeSchema);
+  }
+
+  let result = await postGemmaWithRetry(true);
   if (
     !result.ok &&
     result.status === 400 &&
     /schema|responseJsonSchema|unsupported|unknown field|invalid/i.test(result.text)
   ) {
-    result = await postGemma(false);
+    result = await postGemmaWithRetry(false);
   }
 
   if (!result.ok) {
