@@ -7,13 +7,16 @@ import { Server, type Socket } from "socket.io";
 import {
   DEFAULT_SETTINGS,
   type Ack,
+  type AnswerRevealMode,
   type GameSettings,
   type Grade,
   type LeaderboardEntry,
   type Question,
   type PublicRoomState,
   type PublicTeam,
-  type Role
+  type RoundHistoryEntry,
+  type Role,
+  type ScoreAdjustment
 } from "../shared/types.js";
 
 type AckCallback<T extends object = Record<string, never>> = (response: Ack<T>) => void;
@@ -36,6 +39,8 @@ type TeamRecord = {
   currentGrade?: Grade;
   correctWagerTotal: number;
   answerPoints: number;
+  scoreAdjustment: number;
+  bonusAdjustment: number;
 };
 
 type RoomRecord = {
@@ -49,6 +54,8 @@ type RoomRecord = {
   roundDurationSeconds?: number;
   roundEndsAt?: number;
   roundTimer?: NodeJS.Timeout;
+  history: RoundHistoryEntry[];
+  adjustments: ScoreAdjustment[];
   createdAt: number;
   updatedAt: number;
 };
@@ -76,7 +83,9 @@ function cloneSettings(settings: GameSettings = DEFAULT_SETTINGS): GameSettings 
     questionCount: settings.questionCount,
     pointsPerCorrect: settings.pointsPerCorrect,
     bonusByRank: [...settings.bonusByRank],
-    questions: settings.questions.map((question) => ({ ...question }))
+    questions: settings.questions.map((question) => ({ ...question })),
+    answerRevealMode: settings.answerRevealMode,
+    hideLeaderboardDuringAnswering: settings.hideLeaderboardDuringAnswering
   };
 }
 
@@ -124,15 +133,23 @@ function touch(room: RoomRecord): void {
   room.updatedAt = Date.now();
 }
 
+function adjustedScore(team: TeamRecord): number {
+  return team.correctWagerTotal + team.scoreAdjustment;
+}
+
+function adjustedBonusBase(team: TeamRecord): number {
+  return team.answerPoints + team.bonusAdjustment;
+}
+
 function calculateLeaderboard(room: RoomRecord): LeaderboardEntry[] {
   return [...room.teams]
     .sort((a, b) => {
-      if (b.correctWagerTotal !== a.correctWagerTotal) {
-        return b.correctWagerTotal - a.correctWagerTotal;
+      if (adjustedScore(b) !== adjustedScore(a)) {
+        return adjustedScore(b) - adjustedScore(a);
       }
 
-      if (b.answerPoints !== a.answerPoints) {
-        return b.answerPoints - a.answerPoints;
+      if (adjustedBonusBase(b) !== adjustedBonusBase(a)) {
+        return adjustedBonusBase(b) - adjustedBonusBase(a);
       }
 
       return a.joinOrder - b.joinOrder;
@@ -143,12 +160,40 @@ function calculateLeaderboard(room: RoomRecord): LeaderboardEntry[] {
         teamId: team.id,
         name: team.name,
         rank: index + 1,
-        correctWagerTotal: team.correctWagerTotal,
+        correctWagerTotal: adjustedScore(team),
         answerPoints: team.answerPoints,
+        scoreAdjustment: team.scoreAdjustment,
+        bonusAdjustment: team.bonusAdjustment,
         rankBonus,
-        bonusPoints: team.answerPoints + rankBonus
+        bonusPoints: adjustedBonusBase(team) + rankBonus
       };
     });
+}
+
+function publicHistory(room: RoomRecord, context: SocketContext): RoundHistoryEntry[] {
+  if (context.role === "host") {
+    return room.history;
+  }
+
+  return room.history.map((entry) => ({
+    ...entry,
+    results: entry.results.flatMap((result) => {
+      const isOwnTeam = result.teamId === context.teamId;
+
+      if (room.settings.answerRevealMode === "after_grading" || isOwnTeam) {
+        return [result];
+      }
+
+      if (room.settings.answerRevealMode === "status_only") {
+        return [{
+          ...result,
+          answer: undefined
+        }];
+      }
+
+      return [];
+    })
+  }));
 }
 
 function publicState(room: RoomRecord, context: SocketContext): PublicRoomState {
@@ -163,16 +208,19 @@ function publicState(room: RoomRecord, context: SocketContext): PublicRoomState 
       id: team.id,
       name: team.name,
       joinOrder: team.joinOrder,
+      connected: team.socketIds.size > 0,
       usedWagers: [...team.usedWagers].sort((a, b) => a - b),
       currentWager: team.currentWager,
       wagerLocked: team.currentWager !== undefined,
       hasSubmittedAnswer: team.currentAnswer !== undefined,
       currentAnswer: canSeeAnswer ? team.currentAnswer : undefined,
       currentGrade: canSeeAnswer ? team.currentGrade : undefined,
-      correctWagerTotal: team.correctWagerTotal,
+      correctWagerTotal: adjustedScore(team),
       answerPoints: team.answerPoints,
+      scoreAdjustment: team.scoreAdjustment,
+      bonusAdjustment: team.bonusAdjustment,
       rankBonus: entry?.rankBonus ?? 0,
-      bonusPoints: entry?.bonusPoints ?? team.answerPoints
+      bonusPoints: entry?.bonusPoints ?? adjustedBonusBase(team)
     };
   });
 
@@ -184,6 +232,8 @@ function publicState(room: RoomRecord, context: SocketContext): PublicRoomState 
     settings: cloneSettings(room.settings),
     teams,
     leaderboard,
+    history: publicHistory(room, context),
+    adjustments: context.role === "host" ? room.adjustments : room.adjustments.filter((item) => item.teamId === context.teamId),
     currentRound: room.currentRound,
     roundDurationSeconds: room.roundDurationSeconds,
     roundEndsAt: room.roundEndsAt,
@@ -307,6 +357,7 @@ function validateQuestion(rawQuestion: unknown, index: number): Question | strin
   const code = typeof candidate.code === "string" ? candidate.code : undefined;
   const codeLanguage =
     typeof candidate.codeLanguage === "string" ? candidate.codeLanguage.trim().slice(0, 32) : undefined;
+  const minutes = candidate.minutes === undefined ? undefined : Number(candidate.minutes);
   const imageDataUrl = typeof candidate.imageDataUrl === "string" ? candidate.imageDataUrl : undefined;
   const imageName = typeof candidate.imageName === "string" ? candidate.imageName.trim().slice(0, 140) : undefined;
   const imageAlt = typeof candidate.imageAlt === "string" ? candidate.imageAlt.trim().slice(0, 180) : undefined;
@@ -323,6 +374,10 @@ function validateQuestion(rawQuestion: unknown, index: number): Question | strin
     return `Question ${index + 1} code must be 20000 characters or fewer.`;
   }
 
+  if (minutes !== undefined && (!Number.isFinite(minutes) || minutes <= 0 || minutes > 180)) {
+    return `Question ${index + 1} minutes must be greater than 0 and no more than 180.`;
+  }
+
   if (imageDataUrl) {
     if (!/^data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,/i.test(imageDataUrl)) {
       return `Question ${index + 1} image must be a PNG, JPG, GIF, WebP, or SVG data URL.`;
@@ -337,6 +392,7 @@ function validateQuestion(rawQuestion: unknown, index: number): Question | strin
     text,
     code: code || undefined,
     codeLanguage: codeLanguage || undefined,
+    minutes,
     imageDataUrl,
     imageName,
     imageAlt
@@ -380,6 +436,8 @@ function validateSettings(settings: Partial<GameSettings>): GameSettings | strin
   const questionCount = Number(settings.questionCount);
   const pointsPerCorrect = Number(settings.pointsPerCorrect);
   const bonusByRank = Array.isArray(settings.bonusByRank) ? settings.bonusByRank : [];
+  const answerRevealMode = String(settings.answerRevealMode ?? DEFAULT_SETTINGS.answerRevealMode);
+  const hideLeaderboardDuringAnswering = Boolean(settings.hideLeaderboardDuringAnswering);
   const questions = validateQuestions(settings.questions);
 
   if (typeof questions === "string") {
@@ -405,11 +463,17 @@ function validateSettings(settings: Partial<GameSettings>): GameSettings | strin
     return "Bonus values must be whole numbers from 0 to 100000.";
   }
 
+  if (!["host_only", "after_grading", "status_only"].includes(answerRevealMode)) {
+    return "Answer reveal mode is invalid.";
+  }
+
   return {
     questionCount: nextQuestionCount,
     pointsPerCorrect,
     bonusByRank: parsedBonuses,
-    questions
+    questions,
+    answerRevealMode: answerRevealMode as AnswerRevealMode,
+    hideLeaderboardDuringAnswering
   };
 }
 
@@ -469,7 +533,12 @@ function resetGame(room: RoomRecord): void {
     team.currentGrade = undefined;
     team.correctWagerTotal = 0;
     team.answerPoints = 0;
+    team.scoreAdjustment = 0;
+    team.bonusAdjustment = 0;
   }
+
+  room.history = [];
+  room.adjustments = [];
 
   touch(room);
 }
@@ -485,6 +554,8 @@ io.on("connection", (socket) => {
       settings: cloneSettings(),
       teams: [],
       currentRound: 0,
+      history: [],
+      adjustments: [],
       createdAt: Date.now(),
       updatedAt: Date.now()
     };
@@ -530,7 +601,9 @@ io.on("connection", (socket) => {
         joinOrder: room.teams.length,
         usedWagers: new Set(),
         correctWagerTotal: 0,
-        answerPoints: 0
+        answerPoints: 0,
+        scoreAdjustment: 0,
+        bonusAdjustment: 0
       };
 
       room.teams.push(team);
@@ -599,6 +672,39 @@ io.on("connection", (socket) => {
     }
   );
 
+  socket.on(
+    "team:remove",
+    (payload: { code?: unknown; hostToken?: unknown; teamId?: unknown }, ack?: AckCallback) => {
+      const room = requireHost(socket, ack, payload);
+      if (!room) {
+        return;
+      }
+
+      if (room.phase !== "lobby") {
+        fail(socket, ack, "Teams can only be removed in the lobby.");
+        return;
+      }
+
+      const teamIndex = room.teams.findIndex((team) => team.id === payload.teamId);
+      if (teamIndex === -1) {
+        fail(socket, ack, "Team not found.");
+        return;
+      }
+
+      const [team] = room.teams.splice(teamIndex, 1);
+      for (const socketId of team.socketIds) {
+        const teamSocket = io.sockets.sockets.get(socketId);
+        connections.delete(socketId);
+        teamSocket?.leave(room.code);
+        teamSocket?.emit("room:error", { message: "Your team was removed by the host." });
+      }
+
+      touch(room);
+      ok(ack, {});
+      broadcastState(room);
+    }
+  );
+
   socket.on("game:start", (payload: { code?: unknown; hostToken?: unknown }, ack?: AckCallback) => {
     const room = requireHost(socket, ack, payload);
     if (!room) {
@@ -622,8 +728,12 @@ io.on("connection", (socket) => {
       team.currentGrade = undefined;
       team.correctWagerTotal = 0;
       team.answerPoints = 0;
+      team.scoreAdjustment = 0;
+      team.bonusAdjustment = 0;
     }
 
+    room.history = [];
+    room.adjustments = [];
     room.currentRound = 1;
     room.phase = "round_setup";
     room.roundDurationSeconds = undefined;
@@ -664,6 +774,67 @@ io.on("connection", (socket) => {
       }
 
       team.currentWager = wager;
+      touch(room);
+      ok(ack, {});
+      broadcastState(room);
+    }
+  );
+
+  socket.on(
+    "score:adjust",
+    (
+      payload: {
+        code?: unknown;
+        hostToken?: unknown;
+        teamId?: unknown;
+        scoreDelta?: unknown;
+        bonusDelta?: unknown;
+        note?: unknown;
+      },
+      ack?: AckCallback
+    ) => {
+      const room = requireHost(socket, ack, payload);
+      if (!room) {
+        return;
+      }
+
+      if (room.phase === "lobby") {
+        fail(socket, ack, "Start the game before adjusting scores.");
+        return;
+      }
+
+      const team = room.teams.find((candidate) => candidate.id === payload.teamId);
+      if (!team) {
+        fail(socket, ack, "Team not found.");
+        return;
+      }
+
+      const scoreDelta = Number(payload.scoreDelta ?? 0);
+      const bonusDelta = Number(payload.bonusDelta ?? 0);
+      const note = String(payload.note ?? "").trim().slice(0, 180);
+
+      if (!Number.isFinite(scoreDelta) || !Number.isFinite(bonusDelta)) {
+        fail(socket, ack, "Adjustments must be numbers.");
+        return;
+      }
+
+      if (scoreDelta === 0 && bonusDelta === 0) {
+        fail(socket, ack, "Enter a score or bonus adjustment.");
+        return;
+      }
+
+      team.scoreAdjustment += scoreDelta;
+      team.bonusAdjustment += bonusDelta;
+      room.adjustments.push({
+        id: crypto.randomUUID(),
+        teamId: team.id,
+        teamName: team.name,
+        scoreDelta,
+        bonusDelta,
+        note,
+        createdAt: Date.now()
+      });
+
       touch(room);
       ok(ack, {});
       broadcastState(room);
@@ -805,23 +976,40 @@ io.on("connection", (socket) => {
         }
       }
 
+      const results: RoundHistoryEntry["results"] = [];
+
       for (const team of room.teams) {
         const grade = grades[team.id];
         const wager = team.currentWager;
-        team.currentGrade = grade;
+        const scoreDelta = grade === "correct" && wager !== undefined ? wager : 0;
+        const bonusDelta = grade === "correct" ? room.settings.pointsPerCorrect : 0;
+
+        results.push({
+          teamId: team.id,
+          teamName: team.name,
+          wager,
+          answer: team.currentAnswer,
+          grade,
+          scoreDelta,
+          bonusDelta
+        });
 
         if (wager !== undefined) {
           team.usedWagers.add(wager);
           if (grade === "correct") {
-            team.correctWagerTotal += wager;
-            team.answerPoints += room.settings.pointsPerCorrect;
+            team.correctWagerTotal += scoreDelta;
+            team.answerPoints += bonusDelta;
           }
         }
-
-        team.currentWager = undefined;
-        team.currentAnswer = undefined;
-        team.currentGrade = undefined;
       }
+
+      room.history.push({
+        round: room.currentRound,
+        question: room.settings.questions[room.currentRound - 1],
+        durationSeconds: room.roundDurationSeconds,
+        gradedAt: Date.now(),
+        results
+      });
 
       resetCurrentRoundFields(room);
 

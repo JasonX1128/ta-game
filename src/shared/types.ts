@@ -10,26 +10,60 @@ export type Role = "host" | "team";
 
 export type Grade = "correct" | "incorrect";
 
+export type AnswerRevealMode = "host_only" | "after_grading" | "status_only";
+
 export type GameSettings = {
   questionCount: number;
   pointsPerCorrect: number;
   bonusByRank: number[];
   questions: Question[];
+  answerRevealMode: AnswerRevealMode;
+  hideLeaderboardDuringAnswering: boolean;
 };
 
 export type Question = {
   text: string;
   code?: string;
   codeLanguage?: string;
+  minutes?: number;
   imageDataUrl?: string;
   imageName?: string;
   imageAlt?: string;
+};
+
+export type TeamRoundResult = {
+  teamId: string;
+  teamName: string;
+  wager?: number;
+  answer?: string;
+  grade: Grade;
+  scoreDelta: number;
+  bonusDelta: number;
+};
+
+export type RoundHistoryEntry = {
+  round: number;
+  question?: Question;
+  durationSeconds?: number;
+  gradedAt: number;
+  results: TeamRoundResult[];
+};
+
+export type ScoreAdjustment = {
+  id: string;
+  teamId: string;
+  teamName: string;
+  scoreDelta: number;
+  bonusDelta: number;
+  note: string;
+  createdAt: number;
 };
 
 export type PublicTeam = {
   id: string;
   name: string;
   joinOrder: number;
+  connected: boolean;
   usedWagers: number[];
   currentWager?: number;
   wagerLocked: boolean;
@@ -38,6 +72,8 @@ export type PublicTeam = {
   currentGrade?: Grade;
   correctWagerTotal: number;
   answerPoints: number;
+  scoreAdjustment: number;
+  bonusAdjustment: number;
   rankBonus: number;
   bonusPoints: number;
 };
@@ -48,6 +84,8 @@ export type LeaderboardEntry = {
   rank: number;
   correctWagerTotal: number;
   answerPoints: number;
+  scoreAdjustment: number;
+  bonusAdjustment: number;
   rankBonus: number;
   bonusPoints: number;
 };
@@ -60,6 +98,8 @@ export type PublicRoomState = {
   settings: GameSettings;
   teams: PublicTeam[];
   leaderboard: LeaderboardEntry[];
+  history: RoundHistoryEntry[];
+  adjustments: ScoreAdjustment[];
   currentRound: number;
   roundDurationSeconds?: number;
   roundEndsAt?: number;
@@ -74,5 +114,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   questionCount: 5,
   pointsPerCorrect: 10,
   bonusByRank: [10, 5, 2],
-  questions: []
+  questions: [],
+  answerRevealMode: "host_only",
+  hideLeaderboardDuringAnswering: false
 };
