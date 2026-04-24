@@ -603,6 +603,10 @@ h2 {
   background: var(--surface-strong);
 }
 
+.answer-image-wrap {
+  margin-top: 12px;
+}
+
 .question-code-wrap {
   margin-top: 12px;
 }

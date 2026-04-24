@@ -169,6 +169,26 @@ function imageCandidates(index: number): string[] {
   return stems.flatMap((stem) => extensions.map((extension) => `${stem}.${extension}`));
 }
 
+function resolveUploadedImage(
+  lookup: Map<string, File>,
+  index: number,
+  reference: string | undefined,
+  errorLabel: string
+): File | undefined {
+  if (reference) {
+    const explicit = lookup.get(normalizeUploadPath(reference)) ?? lookup.get(basename(reference));
+    if (!explicit) {
+      throw new Error(`Question ${index + 1} references ${reference} for ${errorLabel}, but that image was not uploaded.`);
+    }
+
+    return explicit;
+  }
+
+  return imageCandidates(index)
+    .map((candidateName) => lookup.get(candidateName))
+    .find((file): file is File => Boolean(file));
+}
+
 function normalizeFractions(values: Array<number | undefined>, itemLabel: string): number[] {
   const providedSum = values.reduce<number>((sum, value) => sum + (value ?? 0), 0);
   const missingCount = values.filter((value) => value === undefined).length;
@@ -298,6 +318,9 @@ async function parseQuestionUpload(fileList: FileList | null): Promise<Question[
       image?: unknown;
       imageName?: unknown;
       imageAlt?: unknown;
+      answerImage?: unknown;
+      answerImageName?: unknown;
+      answerImageAlt?: unknown;
     };
     const topic = typeof candidate.topic === "string" ? candidate.topic.trim() : "";
     const text = typeof candidate.text === "string" ? candidate.text.trim() : "";
@@ -313,6 +336,12 @@ async function parseQuestionUpload(fileList: FileList | null): Promise<Question[
         ? candidate.image
         : typeof candidate.imageName === "string"
           ? candidate.imageName
+          : undefined;
+    const answerImageReference =
+      typeof candidate.answerImage === "string"
+        ? candidate.answerImage
+        : typeof candidate.answerImageName === "string"
+          ? candidate.answerImageName
           : undefined;
     const minutes = candidate.minutes === undefined ? undefined : Number(candidate.minutes);
     const answer = typeof candidate.answer === "string" ? candidate.answer.trim() : undefined;
@@ -357,17 +386,8 @@ async function parseQuestionUpload(fileList: FileList | null): Promise<Question[
       });
     }
 
-    let imageFile: File | undefined;
-    if (imageReference) {
-      imageFile = lookup.get(normalizeUploadPath(imageReference)) ?? lookup.get(basename(imageReference));
-      if (!imageFile) {
-        throw new Error(`Question ${index + 1} references ${imageReference}, but that image was not uploaded.`);
-      }
-    } else {
-      imageFile = imageCandidates(index)
-        .map((candidateName) => lookup.get(candidateName))
-        .find((file): file is File => Boolean(file));
-    }
+    const imageFile = resolveUploadedImage(lookup, index, imageReference, "image");
+    const answerImageFile = resolveUploadedImage(lookup, index, answerImageReference, "answer image");
 
     if (imageFile && !isImageFile(imageFile)) {
       throw new Error(`${imageFile.name} is not a supported image file.`);
@@ -375,6 +395,14 @@ async function parseQuestionUpload(fileList: FileList | null): Promise<Question[
 
     if (imageFile && imageFile.size > 2_500_000) {
       throw new Error(`${imageFile.name} is too large. Keep question images under 2.5 MB.`);
+    }
+
+    if (answerImageFile && !isImageFile(answerImageFile)) {
+      throw new Error(`${answerImageFile.name} is not a supported image file.`);
+    }
+
+    if (answerImageFile && answerImageFile.size > 2_500_000) {
+      throw new Error(`${answerImageFile.name} is too large. Keep question images under 2.5 MB.`);
     }
 
     questions.push({
@@ -387,7 +415,10 @@ async function parseQuestionUpload(fileList: FileList | null): Promise<Question[
       parts,
       imageDataUrl: imageFile ? await readFileAsDataUrl(imageFile) : undefined,
       imageName: imageFile?.name,
-      imageAlt: typeof candidate.imageAlt === "string" ? candidate.imageAlt : undefined
+      imageAlt: typeof candidate.imageAlt === "string" ? candidate.imageAlt : undefined,
+      answerImageDataUrl: answerImageFile ? await readFileAsDataUrl(answerImageFile) : undefined,
+      answerImageName: answerImageFile?.name,
+      answerImageAlt: typeof candidate.answerImageAlt === "string" ? candidate.answerImageAlt : undefined
     });
   }
 
@@ -1279,6 +1310,16 @@ function QuestionCard({
           ))}
         </div>
       ) : null}
+      {showAnswer && question.answerImageDataUrl ? (
+        <div className="answer-image-wrap">
+          <div className="question-label">Answer Diagram</div>
+          <img
+            className="question-image"
+            src={question.answerImageDataUrl}
+            alt={question.answerImageAlt || question.answerImageName || ""}
+          />
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -1314,6 +1355,7 @@ function QuestionPreviewList({ questions }: { questions: Question[] }) {
               <span>
                 {question.minutes ? `${question.minutes} min` : "Timer manual"}
                 {question.imageDataUrl ? " · image" : ""}
+                {question.answerImageDataUrl ? " · reveal image" : ""}
                 {question.code ? " · code" : ""}
                 {question.parts?.length ? ` · ${question.parts.length} parts` : ""}
                 {question.answer ? " · answer" : ""}

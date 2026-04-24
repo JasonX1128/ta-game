@@ -127,7 +127,13 @@ function publicSettings(room: RoomRecord, context: SocketContext): GameSettings 
       return question;
     }
 
-    const { answer: _answer, ...questionWithoutAnswer } = question;
+    const {
+      answer: _answer,
+      answerImageDataUrl: _answerImageDataUrl,
+      answerImageName: _answerImageName,
+      answerImageAlt: _answerImageAlt,
+      ...questionWithoutAnswer
+    } = question;
     return {
       ...questionWithoutAnswer,
       parts: question.parts?.map((part) => {
@@ -519,6 +525,11 @@ function validateQuestion(rawQuestion: unknown, index: number): Question | strin
   const imageDataUrl = typeof candidate.imageDataUrl === "string" ? candidate.imageDataUrl : undefined;
   const imageName = typeof candidate.imageName === "string" ? candidate.imageName.trim().slice(0, 140) : undefined;
   const imageAlt = typeof candidate.imageAlt === "string" ? candidate.imageAlt.trim().slice(0, 180) : undefined;
+  const answerImageDataUrl = typeof candidate.answerImageDataUrl === "string" ? candidate.answerImageDataUrl : undefined;
+  const answerImageName =
+    typeof candidate.answerImageName === "string" ? candidate.answerImageName.trim().slice(0, 140) : undefined;
+  const answerImageAlt =
+    typeof candidate.answerImageAlt === "string" ? candidate.answerImageAlt.trim().slice(0, 180) : undefined;
   const rawParts = Array.isArray(candidate.parts) ? candidate.parts : undefined;
 
   if (!text) {
@@ -552,6 +563,16 @@ function validateQuestion(rawQuestion: unknown, index: number): Question | strin
 
     if (imageDataUrl.length > 4_000_000) {
       return `Question ${index + 1} image is too large.`;
+    }
+  }
+
+  if (answerImageDataUrl) {
+    if (!/^data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,/i.test(answerImageDataUrl)) {
+      return `Question ${index + 1} answer image must be a PNG, JPG, GIF, WebP, or SVG data URL.`;
+    }
+
+    if (answerImageDataUrl.length > 4_000_000) {
+      return `Question ${index + 1} answer image is too large.`;
     }
   }
 
@@ -603,7 +624,10 @@ function validateQuestion(rawQuestion: unknown, index: number): Question | strin
     parts,
     imageDataUrl,
     imageName,
-    imageAlt
+    imageAlt,
+    answerImageDataUrl,
+    answerImageName,
+    answerImageAlt
   };
 }
 
@@ -630,6 +654,7 @@ function validateQuestions(rawQuestions: unknown): Question[] | string {
     }
 
     totalImageBytes += question.imageDataUrl?.length ?? 0;
+    totalImageBytes += question.answerImageDataUrl?.length ?? 0;
     questions.push(question);
   }
 

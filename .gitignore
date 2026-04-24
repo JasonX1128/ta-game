@@ -7,3 +7,6 @@ dist/
 .DS_Store
 *.json
 *.svg
+discussion-week-14-one-last-time-upload/
+!sample-question-upload/*.json
+!sample-question-upload/*.svg

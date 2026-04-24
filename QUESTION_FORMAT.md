@@ -12,7 +12,8 @@ Upload either a single `questions.json` file or one folder containing `questions
       "codeLanguage": "python",
       "code": "def add_one(x):\n    return x + 2",
       "answer": "The function adds 2 instead of 1.",
-      "image": "q1.png"
+      "image": "q1.png",
+      "answerImage": "q1-solution.png"
     },
     {
       "topic": "Async JavaScript",
@@ -55,8 +56,11 @@ Rules:
 - `minutes` is optional and auto-fills the host timer for that question.
 - `answer` is optional and is shown to participants only after grades are finalized. When present, it is also sent to Gemma with the question and student answers for host-only grade suggestions.
 - `image` is optional.
+- `answerImage` is optional and is hidden until the official answer is shown. Use this for solution diagrams that would give away the answer during the answering phase.
+- `imageAlt` and `answerImageAlt` are optional and used as image alt text when those images are shown.
 - If using images, upload a folder that contains `questions.json` and the image files.
 - Images can be referenced by filename in `image`, or auto-matched by question number with names like `q1.png`, `1.jpg`, `question1.webp`, or `question-1.png`.
+- `answerImage` uses the same supported image types and is referenced by filename, but it is only revealed after grading.
 - Supported image types: PNG, JPG, GIF, WebP, SVG.
 - `parts` is optional and lets one question contain multiple graded subparts.
 - Each part needs `text`; part-level `code`, `codeLanguage`, `answer`, `id`, and `label` are optional.

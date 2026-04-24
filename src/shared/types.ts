@@ -46,6 +46,9 @@ export type Question = {
   imageDataUrl?: string;
   imageName?: string;
   imageAlt?: string;
+  answerImageDataUrl?: string;
+  answerImageName?: string;
+  answerImageAlt?: string;
 };
 
 export type QuestionPart = {

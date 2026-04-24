@@ -8,7 +8,9 @@
       "code": "def average(values):\n    total = sum(values)\n    return total / len(values)",
       "answer": "The function divides by len(values), so an empty list causes a division-by-zero error. A guard clause or explicit empty-list policy is needed.",
       "image": "q1.svg",
-      "imageAlt": "A small diagram showing values flowing into an average function"
+      "imageAlt": "A small diagram showing values flowing into an average function",
+      "answerImage": "q1.svg",
+      "answerImageAlt": "The same diagram can also be configured as a post-grading reveal image"
     },
     {
       "topic": "Async JavaScript",
