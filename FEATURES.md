@@ -1,4 +1,6 @@
-# Feature Ideas
+# Feature Roadmap
+
+The ideas below are now implemented in the main app. Keep this file as a reference for what each feature is meant to do and as a checklist for future polish.
 
 ## High-Value Next
 
@@ -17,6 +19,8 @@ After the game ends, let the host download a CSV with:
 - Incorrect count
 - Per-round wager, answer, and grade if available
 
+Status: implemented on the final standings screen.
+
 ### Question Preview In Lobby
 
 After upload, show the host a compact preview of all uploaded questions before starting:
@@ -28,6 +32,8 @@ After upload, show the host a compact preview of all uploaded questions before s
 - Validation status
 
 This should make it easy to catch bad formatting, missing images, or wrong question order.
+
+Status: implemented in the host lobby.
 
 ## Game Flow Improvements
 
@@ -43,11 +49,15 @@ Keep and display a round history after each graded round:
 
 Useful for resolving disputes and reviewing the session after play.
 
+Status: implemented after each graded round and on the final screen.
+
 ### Grade Review Before Advancing
 
 After marking answers correct/incorrect, show a confirmation/review state before scores are finalized.
 
 This reduces accidental mis-clicks and gives the host one last chance to adjust grades.
+
+Status: implemented as a review step before finalizing grades.
 
 ### Answer Reveal Mode
 
@@ -57,6 +67,8 @@ Add a setting for whether teams can see other teams' answers after grading:
 - Reveal all answers after grading
 - Reveal only correct/incorrect status
 
+Status: implemented as a lobby setting.
+
 ### Final Podium Screen
 
 Add a polished final standings screen for projecting:
@@ -64,6 +76,8 @@ Add a polished final standings screen for projecting:
 - Top teams highlighted
 - Score and bonus points shown separately
 - Clean final rank order
+
+Status: implemented on the final standings screen.
 
 ## Host Controls
 
@@ -79,11 +93,15 @@ Examples:
 
 Adjustments should appear in round history and CSV export.
 
+Status: implemented as a host control after the game starts.
+
 ### Hide Leaderboard During Answering
 
 Add a lobby setting that hides the leaderboard from teams during the answering phase.
 
 Host should still see it. Teams would see standings again after grading.
+
+Status: implemented as a lobby setting.
 
 ### Per-Question Timer
 
@@ -99,6 +117,8 @@ Allow uploaded questions to include a timer:
 
 When present, auto-fill the host's timer input for that round.
 
+Status: implemented for uploaded questions.
+
 ## Reliability
 
 ### Team Reconnect Cleanup
@@ -110,3 +130,4 @@ Improve refresh/rejoin behavior:
 - Let host remove stale teams from lobby
 - Avoid duplicate team entries after refresh
 
+Status: implemented for rejoin, connected status, and host lobby removal.

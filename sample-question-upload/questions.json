@@ -2,6 +2,7 @@
   "questions": [
     {
       "text": "Read the function below. What bug would make this fail for an empty list?",
+      "minutes": 2,
       "codeLanguage": "python",
       "code": "def average(values):\n    total = sum(values)\n    return total / len(values)",
       "image": "q1.svg",
@@ -9,6 +10,7 @@
     },
     {
       "text": "The chart shows the order that three async tasks completed. Explain why the printed output might not match the order the tasks were started.",
+      "minutes": 3,
       "codeLanguage": "javascript",
       "code": "const tasks = [fetchA(), fetchB(), fetchC()];\nfor (const task of tasks) {\n  console.log(await task);\n}",
       "image": "q2.svg",
@@ -16,6 +18,7 @@
     },
     {
       "text": "No image on this one. What does this SQL query return, and what edge case should you watch for?",
+      "minutes": 2.5,
       "codeLanguage": "sql",
       "code": "SELECT department, COUNT(*) AS total\nFROM employees\nWHERE active = true\nGROUP BY department\nORDER BY total DESC;"
     }

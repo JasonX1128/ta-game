@@ -55,9 +55,13 @@ Editable in the lobby before the game starts:
 - **Question upload**
   - Optional JSON upload with a `questions` array.
   - Each question requires `text`.
-  - Each question can include optional `code`, `codeLanguage`, and `image`.
+  - Each question can include optional `code`, `codeLanguage`, `minutes`, and `image`.
   - If questions are uploaded, `N` is set to the number of uploaded questions.
   - A folder upload can include `questions.json` plus images referenced by filename or named by question number.
+
+- **Visibility settings**
+  - Host can choose whether teams see answers after grading, only correctness status, or host-only history.
+  - Host can hide the team leaderboard during answering.
 
 ## Scoring Interpretation
 
@@ -107,8 +111,10 @@ Confirmed rule:
 
 5. **Grading Phase**
    - Host marks each answer correct/incorrect.
-   - Host submits grades.
+   - Host reviews the grade summary.
+   - Host submits final grades.
    - Server updates scores and used wagers.
+   - Server records round history.
 
 6. **Next Round**
    - If rounds remain, return to round setup.
@@ -228,6 +234,7 @@ type Room = {
 - Uploaded question text is required for each question.
 - Uploaded code blocks and images are optional.
 - Uploaded question count controls `questionCount`.
+- Uploaded question `minutes`, when present, must be greater than 0 and no more than 180.
 - Wagers must be integers from `1..N`.
 - A team cannot reuse a wager.
 - A team cannot submit/change wager after answer phase starts.
