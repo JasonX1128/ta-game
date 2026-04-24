@@ -1407,17 +1407,17 @@ async function cachedGemmaGradeSuggestions(
   }
 }
 
-async function gradeSuggestionsForFinalResults(room: RoomRecord): Promise<Map<string, GradeSuggestion>> {
+function gradeSuggestionsForFinalResults(room: RoomRecord): Map<string, GradeSuggestion> {
   if (!room.settings.llmGradingEnabled) {
     return new Map();
   }
 
-  try {
-    const result = await cachedGemmaGradeSuggestions(room);
-    return new Map(result.suggestions.map((suggestion) => [suggestion.teamId, suggestion]));
-  } catch {
-    return new Map();
+  const cached = room.gradeSuggestionCache;
+  if (cached?.round === room.currentRound && cached.suggestions) {
+    return new Map(cached.suggestions.map((suggestion) => [suggestion.teamId, suggestion]));
   }
+
+  return new Map();
 }
 
 function updateRoundResultGrade(room: RoomRecord, team: TeamRecord, result: RoundHistoryEntry["results"][number], grade: Grade): void {
@@ -2198,7 +2198,7 @@ io.on("connection", (socket) => {
       }
 
       const results: RoundHistoryEntry["results"] = [];
-      const gemmaSuggestions = await gradeSuggestionsForFinalResults(room);
+      const gemmaSuggestions = gradeSuggestionsForFinalResults(room);
 
       for (const team of room.teams) {
         const wager = team.currentWager;

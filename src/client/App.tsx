@@ -618,7 +618,7 @@ export default function App() {
     new Promise((resolve) => {
       socket.timeout(timeoutMs).emit(event, payload, (err: Error | null, response: Ack) => {
         if (err) {
-          resolve({ ok: false, message: "The server did not respond." });
+          resolve({ ok: false, message: `The server did not respond to ${event}.` });
           return;
         }
 
@@ -1696,10 +1696,11 @@ function HostGrading({
     setSuggestionStatus(manual ? "Asking Gemma again..." : "Asking Gemma for suggestions...");
 
     const round = room.currentRound;
+    const suggestionTimeoutMs = Math.max(60000, 15000 + room.teams.length * 15000);
     const response = await request<{ suggestions: GradeSuggestion[]; debugBatches?: GemmaDebugBatch[] }>(
       "grading:suggest",
       hostPayload,
-      30000
+      suggestionTimeoutMs
     );
     if (suggestionRequestId.current !== requestId || room.currentRound !== round) {
       return;
