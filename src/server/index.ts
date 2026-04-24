@@ -768,6 +768,10 @@ function cleanCredit(value: unknown): number | undefined {
   return Math.max(0, Math.min(1, credit));
 }
 
+function normalizePartKey(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
 function extractBalancedJson(text: string, start: number): string | undefined {
   const closingByOpening: Record<string, string> = {
     "{": "}",
@@ -856,7 +860,27 @@ function parseGemmaPartSuggestions(rawParts: unknown, parts: QuestionPart[]): Pa
   }
 
   const partById = new Map(parts.map((part) => [part.id, part]));
-  return rawParts.flatMap((item) => {
+  const normalizedPartLookup = new Map<string, QuestionPart>();
+  for (const [index, part] of parts.entries()) {
+    const label = part.label || `Part ${index + 1}`;
+    for (const candidate of [
+      part.id,
+      label,
+      `part ${index + 1}`,
+      `part${index + 1}`,
+      String(index + 1)
+    ]) {
+      normalizedPartLookup.set(normalizePartKey(candidate), part);
+    }
+  }
+
+  type CandidateSuggestion = Omit<PartGradeSuggestion, "partId"> & {
+    exactPart?: QuestionPart;
+    numberedPart?: QuestionPart;
+    normalizedPart?: QuestionPart;
+  };
+
+  const candidates = rawParts.flatMap((item): CandidateSuggestion[] => {
     if (!item || typeof item !== "object") {
       return [];
     }
@@ -872,25 +896,71 @@ function parseGemmaPartSuggestions(rawParts: unknown, parts: QuestionPart[]): Pa
     const rawPartId = typeof candidate.partId === "string" ? candidate.partId : "";
     const partNumber = Number(candidate.partNumber);
     const numberedPart = Number.isInteger(partNumber) && partNumber >= 1 ? parts[partNumber - 1] : undefined;
-    const matchedPart = partById.get(rawPartId);
-    if (matchedPart && numberedPart && numberedPart.id !== matchedPart.id) {
-      return [];
-    }
-
-    const partId = matchedPart?.id ?? numberedPart?.id ?? "";
     const credit = cleanCredit(candidate.credit);
-    if (!partById.has(partId) || credit === undefined) {
+    if (credit === undefined) {
       return [];
     }
 
     const confidence = Number(candidate.confidence);
     return [{
-      partId,
       credit,
+      exactPart: partById.get(rawPartId),
+      numberedPart,
+      normalizedPart: rawPartId ? normalizedPartLookup.get(normalizePartKey(rawPartId)) : undefined,
       confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : undefined,
       rationale: typeof candidate.rationale === "string" ? candidate.rationale.slice(0, 300) : undefined,
       feedback: typeof candidate.feedback === "string" ? candidate.feedback.slice(0, 800) : undefined
     }];
+  });
+
+  const suggestionsByPartId = new Map<string, PartGradeSuggestion>();
+
+  for (const candidate of candidates) {
+    const orderedCandidates = [candidate.exactPart, candidate.numberedPart, candidate.normalizedPart]
+      .filter((part): part is QuestionPart => Boolean(part))
+      .filter((part, index, items) => items.findIndex((item) => item.id === part.id) === index);
+
+    if (orderedCandidates.length === 0) {
+      continue;
+    }
+
+    let chosenPart = orderedCandidates[0];
+
+    if (candidate.exactPart && candidate.numberedPart && candidate.exactPart.id !== candidate.numberedPart.id) {
+      const exactUsed = suggestionsByPartId.has(candidate.exactPart.id);
+      const numberedUsed = suggestionsByPartId.has(candidate.numberedPart.id);
+      if (exactUsed && !numberedUsed) {
+        chosenPart = candidate.numberedPart;
+      } else if (!exactUsed && numberedUsed) {
+        chosenPart = candidate.exactPart;
+      }
+    } else {
+      chosenPart = orderedCandidates.find((part) => !suggestionsByPartId.has(part.id)) ?? orderedCandidates[0];
+    }
+
+    const nextSuggestion: PartGradeSuggestion = {
+      partId: chosenPart.id,
+      credit: candidate.credit,
+      confidence: candidate.confidence,
+      rationale: candidate.rationale,
+      feedback: candidate.feedback
+    };
+    const existing = suggestionsByPartId.get(chosenPart.id);
+    if (!existing) {
+      suggestionsByPartId.set(chosenPart.id, nextSuggestion);
+      continue;
+    }
+
+    const existingConfidence = existing.confidence ?? -1;
+    const nextConfidence = nextSuggestion.confidence ?? -1;
+    if (nextConfidence >= existingConfidence) {
+      suggestionsByPartId.set(chosenPart.id, nextSuggestion);
+    }
+  }
+
+  return parts.flatMap((part) => {
+    const suggestion = suggestionsByPartId.get(part.id);
+    return suggestion ? [suggestion] : [];
   });
 }
 
@@ -923,14 +993,12 @@ function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>, parts
     const teamId = typeof candidate.teamId === "string" ? candidate.teamId : "";
     const grade = candidate.grade;
     const partSuggestions = parseGemmaPartSuggestions(candidate.partSuggestions, parts);
-    const credit = cleanCredit(candidate.credit) ?? (
-      partSuggestions.length > 0
-        ? roundPoints(parts.reduce((sum, part) => {
-          const suggestion = partSuggestions.find((candidate) => candidate.partId === part.id);
-          return sum + part.fraction * (suggestion?.credit ?? 0);
-        }, 0))
-        : undefined
-    );
+    const credit = partSuggestions.length > 0
+      ? roundPoints(parts.reduce((sum, part) => {
+        const suggestion = partSuggestions.find((candidate) => candidate.partId === part.id);
+        return sum + part.fraction * (suggestion?.credit ?? 0);
+      }, 0))
+      : cleanCredit(candidate.credit);
     const finalGrade: Grade = grade === "correct" || grade === "incorrect"
       ? grade
       : credit !== undefined && credit >= 0.999
