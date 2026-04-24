@@ -16,6 +16,28 @@ Upload either a single `questions.json` file or one folder containing `questions
     {
       "text": "Explain what this output means.",
       "code": "console.log([1, 2, 3].map(x => x * x));"
+    },
+    {
+      "text": "This is a multipart question. Answer each part in the same response box.",
+      "minutes": 4,
+      "parts": [
+        {
+          "id": "bug",
+          "label": "Part A",
+          "text": "Identify the bug in the snippet.",
+          "codeLanguage": "python",
+          "code": "def add_one(x):\n    return x + 2",
+          "answer": "It returns x + 2 instead of x + 1.",
+          "fraction": 0.4
+        },
+        {
+          "id": "fix",
+          "label": "Part B",
+          "text": "Write the corrected line.",
+          "answer": "return x + 1",
+          "fraction": 0.6
+        }
+      ]
     }
   ]
 }
@@ -32,3 +54,7 @@ Rules:
 - If using images, upload a folder that contains `questions.json` and the image files.
 - Images can be referenced by filename in `image`, or auto-matched by question number with names like `q1.png`, `1.jpg`, `question1.webp`, or `question-1.png`.
 - Supported image types: PNG, JPG, GIF, WebP, SVG.
+- `parts` is optional and lets one question contain multiple graded subparts.
+- Each part needs `text`; part-level `code`, `codeLanguage`, `answer`, `id`, and `label` are optional.
+- Part `fraction` is optional. If every part omits it, the question value is split uniformly. If some parts include it, the remaining value is split uniformly across the unweighted parts. If every part includes it, the fractions must add to `1`.
+- Hosts and Gemma grade each part with partial credit from `0` to `1`. The score is `wager * part fraction * partial credit`, summed across parts.

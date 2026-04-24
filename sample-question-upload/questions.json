@@ -24,6 +24,28 @@
       "codeLanguage": "sql",
       "code": "SELECT department, COUNT(*) AS total\nFROM employees\nWHERE active = true\nGROUP BY department\nORDER BY total DESC;",
       "answer": "It returns active employee counts grouped by department, ordered largest to smallest. Watch for NULL departments being grouped together."
+    },
+    {
+      "text": "Multipart debugging question. Put both answers in the same team answer box.",
+      "minutes": 4,
+      "parts": [
+        {
+          "id": "root-cause",
+          "label": "Part A",
+          "text": "What bug makes this function return the wrong result?",
+          "codeLanguage": "python",
+          "code": "def add_one(x):\n    return x + 2",
+          "answer": "The function adds 2 instead of 1.",
+          "fraction": 0.4
+        },
+        {
+          "id": "fix",
+          "label": "Part B",
+          "text": "Write the corrected return statement.",
+          "answer": "return x + 1",
+          "fraction": 0.6
+        }
+      ]
     }
   ]
 }

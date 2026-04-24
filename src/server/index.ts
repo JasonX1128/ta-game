@@ -7,13 +7,16 @@ import crypto from "node:crypto";
 import { Server, type Socket } from "socket.io";
 import {
   DEFAULT_SETTINGS,
+  questionParts,
   type Ack,
   type AnswerRevealMode,
   type GameSettings,
   type Grade,
   type GradeSuggestion,
   type LeaderboardEntry,
+  type PartGradeSuggestion,
   type Question,
+  type QuestionPart,
   type PublicRoomState,
   type PublicTeam,
   type RoundHistoryEntry,
@@ -90,7 +93,10 @@ function cloneSettings(settings: GameSettings = DEFAULT_SETTINGS): GameSettings 
     questionCount: settings.questionCount,
     pointsPerCorrect: settings.pointsPerCorrect,
     bonusByRank: [...settings.bonusByRank],
-    questions: settings.questions.map((question) => ({ ...question })),
+    questions: settings.questions.map((question) => ({
+      ...question,
+      parts: question.parts?.map((part) => ({ ...part }))
+    })),
     scrambleQuestionOrder: settings.scrambleQuestionOrder,
     answerRevealMode: settings.answerRevealMode,
     hideLeaderboardDuringAnswering: settings.hideLeaderboardDuringAnswering,
@@ -115,7 +121,13 @@ function publicSettings(room: RoomRecord, context: SocketContext): GameSettings 
     }
 
     const { answer: _answer, ...questionWithoutAnswer } = question;
-    return questionWithoutAnswer;
+    return {
+      ...questionWithoutAnswer,
+      parts: question.parts?.map((part) => {
+        const { answer: _partAnswer, ...partWithoutAnswer } = part;
+        return partWithoutAnswer;
+      })
+    };
   });
 
   return settings;
@@ -207,21 +219,26 @@ function publicHistory(room: RoomRecord, context: SocketContext): RoundHistoryEn
     return room.history;
   }
 
+  const withoutAiFeedback = (result: RoundHistoryEntry["results"][number]): RoundHistoryEntry["results"][number] => ({
+    ...result,
+    aiFeedback: undefined,
+    partResults: result.partResults?.map((part) => ({ ...part, aiFeedback: undefined }))
+  });
+
   return room.history.map((entry) => ({
     ...entry,
     results: entry.results.flatMap((result) => {
       const isOwnTeam = result.teamId === context.teamId;
 
       if (room.settings.answerRevealMode === "after_grading" || isOwnTeam) {
-        return [isOwnTeam ? result : { ...result, aiFeedback: undefined }];
+        return [isOwnTeam ? result : withoutAiFeedback(result)];
       }
 
       if (room.settings.answerRevealMode === "status_only") {
-        return [{
+        return [withoutAiFeedback({
           ...result,
           answer: undefined,
-          aiFeedback: undefined
-        }];
+        })];
       }
 
       return [];
@@ -397,6 +414,86 @@ function requireTeam<T extends object>(
   return { room, team };
 }
 
+function normalizeFractions(values: Array<number | undefined>, itemLabel: string): number[] | string {
+  const providedSum = values.reduce<number>((sum, value) => sum + (value ?? 0), 0);
+  const missingCount = values.filter((value) => value === undefined).length;
+
+  if (values.some((value) => value !== undefined && (!Number.isFinite(value) || value <= 0 || value > 1))) {
+    return `${itemLabel} fractions must be greater than 0 and no more than 1.`;
+  }
+
+  if (missingCount === values.length) {
+    return values.map(() => 1 / values.length);
+  }
+
+  if (providedSum > 1.0001) {
+    return `${itemLabel} fractions cannot add up to more than 1.`;
+  }
+
+  if (missingCount === 0) {
+    if (Math.abs(providedSum - 1) > 0.001) {
+      return `${itemLabel} fractions must add up to 1.`;
+    }
+
+    return values.map((value) => value ?? 0);
+  }
+
+  const remaining = 1 - providedSum;
+  if (remaining <= 0) {
+    return `${itemLabel} has no remaining value for unweighted parts.`;
+  }
+
+  return values.map((value) => value ?? remaining / missingCount);
+}
+
+function validateQuestionPart(rawPart: unknown, questionIndex: number, partIndex: number): (Omit<QuestionPart, "fraction"> & {
+  fraction?: number;
+}) | string {
+  if (!rawPart || typeof rawPart !== "object") {
+    return `Question ${questionIndex + 1} part ${partIndex + 1} must be an object.`;
+  }
+
+  const candidate = rawPart as Partial<QuestionPart>;
+  const text = String(candidate.text ?? "").trim();
+  const code = typeof candidate.code === "string" ? candidate.code : undefined;
+  const codeLanguage =
+    typeof candidate.codeLanguage === "string" ? candidate.codeLanguage.trim().slice(0, 32) : undefined;
+  const answer = typeof candidate.answer === "string" ? candidate.answer.trim() : undefined;
+  const id = typeof candidate.id === "string" && candidate.id.trim()
+    ? candidate.id.trim().slice(0, 48)
+    : `part-${partIndex + 1}`;
+  const label = typeof candidate.label === "string" && candidate.label.trim()
+    ? candidate.label.trim().slice(0, 80)
+    : `Part ${partIndex + 1}`;
+  const fraction = candidate.fraction === undefined ? undefined : Number(candidate.fraction);
+
+  if (!text) {
+    return `Question ${questionIndex + 1} part ${partIndex + 1} needs text.`;
+  }
+
+  if (text.length > 5000) {
+    return `Question ${questionIndex + 1} part ${partIndex + 1} text must be 5000 characters or fewer.`;
+  }
+
+  if (code && code.length > 20000) {
+    return `Question ${questionIndex + 1} part ${partIndex + 1} code must be 20000 characters or fewer.`;
+  }
+
+  if (answer && answer.length > 10000) {
+    return `Question ${questionIndex + 1} part ${partIndex + 1} answer must be 10000 characters or fewer.`;
+  }
+
+  return {
+    id,
+    label,
+    text,
+    code: code || undefined,
+    codeLanguage: codeLanguage || undefined,
+    answer: answer || undefined,
+    fraction
+  };
+}
+
 function validateQuestion(rawQuestion: unknown, index: number): Question | string {
   if (!rawQuestion || typeof rawQuestion !== "object") {
     return `Question ${index + 1} must be an object.`;
@@ -412,6 +509,7 @@ function validateQuestion(rawQuestion: unknown, index: number): Question | strin
   const imageDataUrl = typeof candidate.imageDataUrl === "string" ? candidate.imageDataUrl : undefined;
   const imageName = typeof candidate.imageName === "string" ? candidate.imageName.trim().slice(0, 140) : undefined;
   const imageAlt = typeof candidate.imageAlt === "string" ? candidate.imageAlt.trim().slice(0, 180) : undefined;
+  const rawParts = Array.isArray(candidate.parts) ? candidate.parts : undefined;
 
   if (!text) {
     return `Question ${index + 1} needs text.`;
@@ -443,12 +541,51 @@ function validateQuestion(rawQuestion: unknown, index: number): Question | strin
     }
   }
 
+  let parts: QuestionPart[] | undefined;
+  if (candidate.parts !== undefined) {
+    if (!rawParts || rawParts.length === 0) {
+      return `Question ${index + 1} parts must be a non-empty array.`;
+    }
+
+    if (rawParts.length > 12) {
+      return `Question ${index + 1} cannot have more than 12 parts.`;
+    }
+
+    const parsedParts = rawParts.map((part, partIndex) => validateQuestionPart(part, index, partIndex));
+    const firstError = parsedParts.find((part): part is string => typeof part === "string");
+    if (firstError) {
+      return firstError;
+    }
+
+    const typedParts = parsedParts as Array<Omit<QuestionPart, "fraction"> & { fraction?: number }>;
+    const fractions = normalizeFractions(
+      typedParts.map((part) => part.fraction),
+      `Question ${index + 1} part`
+    );
+    if (typeof fractions === "string") {
+      return fractions;
+    }
+
+    const seenIds = new Set<string>();
+    parts = typedParts.map((part, partIndex) => {
+      const baseId = part.id || `part-${partIndex + 1}`;
+      const id = seenIds.has(baseId) ? `${baseId}-${partIndex + 1}` : baseId;
+      seenIds.add(id);
+      return {
+        ...part,
+        id,
+        fraction: fractions[partIndex]
+      };
+    });
+  }
+
   return {
     text,
     code: code || undefined,
     codeLanguage: codeLanguage || undefined,
     minutes,
     answer: answer || undefined,
+    parts,
     imageDataUrl,
     imageName,
     imageAlt
@@ -582,7 +719,50 @@ function extractGemmaText(response: unknown): string | undefined {
     .join("\n");
 }
 
-function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>): GradeSuggestion[] {
+function cleanCredit(value: unknown): number | undefined {
+  const credit = Number(value);
+  if (!Number.isFinite(credit)) {
+    return undefined;
+  }
+
+  return Math.max(0, Math.min(1, credit));
+}
+
+function parseGemmaPartSuggestions(rawParts: unknown, validPartIds: Set<string>): PartGradeSuggestion[] {
+  if (!Array.isArray(rawParts)) {
+    return [];
+  }
+
+  return rawParts.flatMap((item) => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+
+    const candidate = item as {
+      partId?: unknown;
+      credit?: unknown;
+      confidence?: unknown;
+      rationale?: unknown;
+      feedback?: unknown;
+    };
+    const partId = typeof candidate.partId === "string" ? candidate.partId : "";
+    const credit = cleanCredit(candidate.credit);
+    if (!validPartIds.has(partId) || credit === undefined) {
+      return [];
+    }
+
+    const confidence = Number(candidate.confidence);
+    return [{
+      partId,
+      credit,
+      confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : undefined,
+      rationale: typeof candidate.rationale === "string" ? candidate.rationale.slice(0, 300) : undefined,
+      feedback: typeof candidate.feedback === "string" ? candidate.feedback.slice(0, 800) : undefined
+    }];
+  });
+}
+
+function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>, validPartIds: Set<string>): GradeSuggestion[] {
   const trimmed = rawText.trim();
   const jsonText = trimmed.startsWith("```")
     ? trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")
@@ -601,13 +781,26 @@ function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>): Grad
     const candidate = item as {
       teamId?: unknown;
       grade?: unknown;
+      credit?: unknown;
       confidence?: unknown;
       rationale?: unknown;
       feedback?: unknown;
+      partSuggestions?: unknown;
     };
     const teamId = typeof candidate.teamId === "string" ? candidate.teamId : "";
     const grade = candidate.grade;
-    if (!validTeamIds.has(teamId) || (grade !== "correct" && grade !== "incorrect")) {
+    const partSuggestions = parseGemmaPartSuggestions(candidate.partSuggestions, validPartIds);
+    const credit = cleanCredit(candidate.credit) ?? (
+      partSuggestions.length > 0
+        ? partSuggestions.reduce((sum, part) => sum + part.credit, 0) / partSuggestions.length
+        : undefined
+    );
+    const finalGrade = grade === "correct" || grade === "incorrect"
+      ? grade
+      : credit !== undefined && credit >= 0.999
+        ? "correct"
+        : "incorrect";
+    if (!validTeamIds.has(teamId)) {
       return [];
     }
 
@@ -620,10 +813,12 @@ function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>): Grad
 
     return [{
       teamId,
-      grade,
+      grade: finalGrade,
+      credit,
       confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : undefined,
       rationale: typeof candidate.rationale === "string" ? candidate.rationale.slice(0, 300) : undefined,
-      feedback: feedback?.slice(0, 800)
+      feedback: feedback?.slice(0, 800),
+      partSuggestions
     }];
   });
 }
@@ -642,6 +837,7 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
   const apiBase = process.env.GEMMA_API_BASE || "https://generativelanguage.googleapis.com/v1beta";
   const modelPath = model.startsWith("models/") ? model : `models/${model}`;
   const question = room.settings.questions[room.currentRound - 1];
+  const parts = questionParts(question);
   const teams = room.teams.map((team) => ({
     teamId: team.id,
     teamName: team.name,
@@ -649,15 +845,17 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
     studentAnswer: team.currentAnswer ?? ""
   }));
   const validTeamIds = new Set(teams.map((team) => team.teamId));
+  const validPartIds = new Set(parts.map((part) => part.id));
   const prompt = [
     "You are helping a human host grade a classroom game.",
-    "Use the question, official answer, optional code block, and each team's student answer.",
-    "Suggest whether each answer should be marked correct or incorrect.",
-    "Be conservative: mark correct only when the student answer substantially matches the official answer.",
+    "Use the question, official answers, optional code blocks, and each team's student answer.",
+    "Grade every question part with a decimal credit from 0 to 1.",
+    "Use 1 for full credit, 0 for no credit, and a decimal for partial credit.",
+    "Set the overall grade to correct only when all parts receive full credit.",
     "Also write feedback for each team that will be shown directly to that team after grades are finalized.",
     "Student-facing feedback should be concise, constructive, and explain what was right or missing without mentioning internal confidence.",
     "Return only JSON matching this schema:",
-    '{"suggestions":[{"teamId":"string","grade":"correct|incorrect","confidence":0.0,"rationale":"short host-only explanation","feedback":"student-facing feedback"}]}',
+    '{"suggestions":[{"teamId":"string","grade":"correct|incorrect","credit":0.0,"confidence":0.0,"rationale":"short host-only explanation","feedback":"student-facing feedback","partSuggestions":[{"partId":"string","credit":0.0,"confidence":0.0,"rationale":"short explanation","feedback":"student-facing part feedback"}]}]}',
     "Do not include markdown or commentary outside JSON.",
     "",
     JSON.stringify({
@@ -666,7 +864,16 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
         text: question?.text ?? "",
         codeLanguage: question?.codeLanguage ?? "",
         code: question?.code ?? "",
-        officialAnswer: question?.answer ?? ""
+        officialAnswer: question?.answer ?? "",
+        parts: parts.map((part) => ({
+          partId: part.id,
+          label: part.label ?? part.id,
+          fraction: part.fraction,
+          text: part.text,
+          codeLanguage: part.codeLanguage ?? "",
+          code: part.code ?? "",
+          officialAnswer: part.answer ?? ""
+        }))
       },
       teams
     })
@@ -683,11 +890,26 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
           properties: {
             teamId: { type: "string" },
             grade: { type: "string", enum: ["correct", "incorrect"] },
+            credit: { type: "number" },
             confidence: { type: "number" },
             rationale: { type: "string" },
-            feedback: { type: "string" }
+            feedback: { type: "string" },
+            partSuggestions: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  partId: { type: "string" },
+                  credit: { type: "number" },
+                  confidence: { type: "number" },
+                  rationale: { type: "string" },
+                  feedback: { type: "string" }
+                },
+                required: ["partId", "credit"]
+              }
+            }
           },
-          required: ["teamId", "grade", "feedback"]
+          required: ["teamId", "grade", "feedback", "partSuggestions"]
         }
       }
     },
@@ -762,7 +984,7 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
     throw new Error("Gemma response did not contain text.");
   }
 
-  return parseGemmaSuggestions(text, validTeamIds);
+  return parseGemmaSuggestions(text, validTeamIds, validPartIds);
 }
 
 async function cachedGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSuggestion[]> {
@@ -811,14 +1033,32 @@ async function gradeSuggestionsForFinalResults(room: RoomRecord): Promise<Map<st
 function updateRoundResultGrade(room: RoomRecord, team: TeamRecord, result: RoundHistoryEntry["results"][number], grade: Grade): void {
   const previousScoreDelta = result.scoreDelta;
   const previousBonusDelta = result.bonusDelta;
-  const nextScoreDelta = grade === "correct" ? result.wager ?? 0 : 0;
-  const nextBonusDelta = grade === "correct" ? room.settings.pointsPerCorrect : 0;
+  const credit = grade === "correct" ? 1 : 0;
+  const nextScoreDelta = roundPoints((result.wager ?? 0) * credit);
+  const nextBonusDelta = roundPoints(room.settings.pointsPerCorrect * credit);
 
   result.grade = grade;
+  result.credit = credit;
   result.scoreDelta = nextScoreDelta;
   result.bonusDelta = nextBonusDelta;
+  if (result.partResults?.length) {
+    result.partResults = result.partResults.map((part) => ({
+      ...part,
+      credit,
+      scoreDelta: roundPoints((result.wager ?? 0) * part.fraction * credit),
+      bonusDelta: roundPoints(room.settings.pointsPerCorrect * part.fraction * credit)
+    }));
+  }
   team.correctWagerTotal += nextScoreDelta - previousScoreDelta;
   team.answerPoints += nextBonusDelta - previousBonusDelta;
+}
+
+function roundPoints(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+function weightedCredit(parts: QuestionPart[], credits: Map<string, number>): number {
+  return roundPoints(parts.reduce((sum, part) => sum + part.fraction * (credits.get(part.id) ?? 0), 0));
 }
 
 function lowestAvailableWager(room: RoomRecord, team: TeamRecord): number | undefined {
@@ -832,7 +1072,10 @@ function lowestAvailableWager(room: RoomRecord, team: TeamRecord): number | unde
 }
 
 function shuffledQuestions(questions: Question[]): Question[] {
-  const next = questions.map((question) => ({ ...question }));
+  const next = questions.map((question) => ({
+    ...question,
+    parts: question.parts?.map((part) => ({ ...part }))
+  }));
   for (let index = next.length - 1; index > 0; index -= 1) {
     const swapIndex = Math.floor(Math.random() * (index + 1));
     [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
@@ -1413,7 +1656,12 @@ io.on("connection", (socket) => {
   socket.on(
     "answer:grade",
     async (
-      payload: { code?: unknown; hostToken?: unknown; grades?: Record<string, Grade> },
+      payload: {
+        code?: unknown;
+        hostToken?: unknown;
+        grades?: Record<string, Grade>;
+        partCredits?: Record<string, Record<string, number>>;
+      },
       ack?: AckCallback
     ) => {
       const room = requireHost(socket, ack, payload);
@@ -1427,11 +1675,25 @@ io.on("connection", (socket) => {
       }
 
       const grades = payload.grades ?? {};
+      const question = room.settings.questions[room.currentRound - 1];
+      const parts = questionParts(question);
+      const partCredits = payload.partCredits ?? {};
       for (const team of room.teams) {
-        const grade = grades[team.id];
-        if (grade !== "correct" && grade !== "incorrect") {
-          fail(socket, ack, `Grade ${team.name} before submitting.`);
-          return;
+        const teamPartCredits = partCredits[team.id];
+        if (teamPartCredits) {
+          for (const part of parts) {
+            const credit = Number(teamPartCredits[part.id]);
+            if (!Number.isFinite(credit) || credit < 0 || credit > 1) {
+              fail(socket, ack, `Grade ${team.name} ${part.label ?? part.id} with a partial credit from 0 to 1.`);
+              return;
+            }
+          }
+        } else {
+          const grade = grades[team.id];
+          if (grade !== "correct" && grade !== "incorrect") {
+            fail(socket, ack, `Grade ${team.name} before submitting.`);
+            return;
+          }
         }
       }
 
@@ -1439,11 +1701,32 @@ io.on("connection", (socket) => {
       const gemmaSuggestions = await gradeSuggestionsForFinalResults(room);
 
       for (const team of room.teams) {
-        const grade = grades[team.id];
         const wager = team.currentWager;
-        const scoreDelta = grade === "correct" && wager !== undefined ? wager : 0;
-        const bonusDelta = grade === "correct" ? room.settings.pointsPerCorrect : 0;
-        const aiFeedback = gemmaSuggestions.get(team.id)?.feedback?.trim();
+        const teamPartCredits = partCredits[team.id];
+        const legacyGrade = grades[team.id];
+        const credits = new Map(parts.map((part) => [
+          part.id,
+          teamPartCredits ? Number(teamPartCredits[part.id]) : legacyGrade === "correct" ? 1 : 0
+        ]));
+        const credit = weightedCredit(parts, credits);
+        const grade: Grade = credit >= 0.999 ? "correct" : "incorrect";
+        const scoreDelta = roundPoints((wager ?? 0) * credit);
+        const bonusDelta = roundPoints(room.settings.pointsPerCorrect * credit);
+        const suggestion = gemmaSuggestions.get(team.id);
+        const suggestionParts = new Map((suggestion?.partSuggestions ?? []).map((part) => [part.partId, part]));
+        const partResults = parts.map((part) => {
+          const partCredit = credits.get(part.id) ?? 0;
+          return {
+            partId: part.id,
+            label: part.label,
+            fraction: part.fraction,
+            credit: partCredit,
+            scoreDelta: roundPoints((wager ?? 0) * part.fraction * partCredit),
+            bonusDelta: roundPoints(room.settings.pointsPerCorrect * part.fraction * partCredit),
+            aiFeedback: suggestionParts.get(part.id)?.feedback
+          };
+        });
+        const aiFeedback = suggestion?.feedback?.trim();
 
         results.push({
           teamId: team.id,
@@ -1451,23 +1734,23 @@ io.on("connection", (socket) => {
           wager,
           answer: team.currentAnswer,
           grade,
+          credit,
           scoreDelta,
           bonusDelta,
+          partResults,
           aiFeedback: aiFeedback || undefined
         });
 
         if (wager !== undefined) {
           team.usedWagers.add(wager);
-          if (grade === "correct") {
-            team.correctWagerTotal += scoreDelta;
-            team.answerPoints += bonusDelta;
-          }
+          team.correctWagerTotal += scoreDelta;
+          team.answerPoints += bonusDelta;
         }
       }
 
       room.history.push({
         round: room.currentRound,
-        question: room.settings.questions[room.currentRound - 1],
+        question,
         durationSeconds: room.roundDurationSeconds,
         gradedAt: Date.now(),
         results

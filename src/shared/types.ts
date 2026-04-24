@@ -15,9 +15,11 @@ export type ProtestStatus = "pending" | "accepted" | "rejected";
 export type GradeSuggestion = {
   teamId: string;
   grade: Grade;
+  credit?: number;
   confidence?: number;
   rationale?: string;
   feedback?: string;
+  partSuggestions?: PartGradeSuggestion[];
 };
 
 export type AnswerRevealMode = "host_only" | "after_grading" | "status_only";
@@ -39,9 +41,38 @@ export type Question = {
   codeLanguage?: string;
   minutes?: number;
   answer?: string;
+  parts?: QuestionPart[];
   imageDataUrl?: string;
   imageName?: string;
   imageAlt?: string;
+};
+
+export type QuestionPart = {
+  id: string;
+  label?: string;
+  text: string;
+  code?: string;
+  codeLanguage?: string;
+  answer?: string;
+  fraction: number;
+};
+
+export type PartGradeSuggestion = {
+  partId: string;
+  credit: number;
+  confidence?: number;
+  rationale?: string;
+  feedback?: string;
+};
+
+export type TeamPartResult = {
+  partId: string;
+  label?: string;
+  fraction: number;
+  credit: number;
+  scoreDelta: number;
+  bonusDelta: number;
+  aiFeedback?: string;
 };
 
 export type TeamRoundResult = {
@@ -50,8 +81,10 @@ export type TeamRoundResult = {
   wager?: number;
   answer?: string;
   grade: Grade;
+  credit?: number;
   scoreDelta: number;
   bonusDelta: number;
+  partResults?: TeamPartResult[];
   aiFeedback?: string;
   protest?: {
     text: string;
@@ -141,3 +174,25 @@ export const DEFAULT_SETTINGS: GameSettings = {
   hideLeaderboardDuringAnswering: false,
   llmGradingEnabled: false
 };
+
+export const SINGLE_PART_ID = "main";
+
+export function questionParts(question?: Question): QuestionPart[] {
+  if (!question) {
+    return [];
+  }
+
+  if (question.parts?.length) {
+    return question.parts;
+  }
+
+  return [{
+    id: SINGLE_PART_ID,
+    label: "Question",
+    text: question.text,
+    code: question.code,
+    codeLanguage: question.codeLanguage,
+    answer: question.answer,
+    fraction: 1
+  }];
+}

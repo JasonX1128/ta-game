@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
+import { questionParts } from "../shared/types";
 import type {
   Ack,
   AnswerRevealMode,
@@ -32,6 +33,7 @@ import type {
   PublicRoomState,
   PublicTeam,
   Question,
+  QuestionPart,
   Role,
   RoundHistoryEntry
 } from "../shared/types";
@@ -167,6 +169,93 @@ function imageCandidates(index: number): string[] {
   return stems.flatMap((stem) => extensions.map((extension) => `${stem}.${extension}`));
 }
 
+function normalizeFractions(values: Array<number | undefined>, itemLabel: string): number[] {
+  const providedSum = values.reduce<number>((sum, value) => sum + (value ?? 0), 0);
+  const missingCount = values.filter((value) => value === undefined).length;
+
+  if (values.some((value) => value !== undefined && (!Number.isFinite(value) || value <= 0 || value > 1))) {
+    throw new Error(`${itemLabel} fractions must be greater than 0 and no more than 1.`);
+  }
+
+  if (missingCount === values.length) {
+    return values.map(() => 1 / values.length);
+  }
+
+  if (providedSum > 1.0001) {
+    throw new Error(`${itemLabel} fractions cannot add up to more than 1.`);
+  }
+
+  if (missingCount === 0) {
+    if (Math.abs(providedSum - 1) > 0.001) {
+      throw new Error(`${itemLabel} fractions must add up to 1.`);
+    }
+
+    return values.map((value) => value ?? 0);
+  }
+
+  const remaining = 1 - providedSum;
+  if (remaining <= 0) {
+    throw new Error(`${itemLabel} has no remaining value for unweighted parts.`);
+  }
+
+  return values.map((value) => value ?? remaining / missingCount);
+}
+
+function parseUploadPart(rawPart: unknown, questionIndex: number, partIndex: number): Omit<QuestionPart, "fraction"> & {
+  fraction?: number;
+} {
+  if (!rawPart || typeof rawPart !== "object") {
+    throw new Error(`Question ${questionIndex + 1} part ${partIndex + 1} must be an object.`);
+  }
+
+  const candidate = rawPart as {
+    id?: unknown;
+    label?: unknown;
+    text?: unknown;
+    code?: unknown;
+    codeLanguage?: unknown;
+    language?: unknown;
+    answer?: unknown;
+    fraction?: unknown;
+  };
+  const text = typeof candidate.text === "string" ? candidate.text.trim() : "";
+  const code = typeof candidate.code === "string" ? candidate.code : undefined;
+  const codeLanguage =
+    typeof candidate.codeLanguage === "string"
+      ? candidate.codeLanguage
+      : typeof candidate.language === "string"
+        ? candidate.language
+        : undefined;
+  const answer = typeof candidate.answer === "string" ? candidate.answer.trim() : undefined;
+  const fraction = candidate.fraction === undefined ? undefined : Number(candidate.fraction);
+  const label =
+    typeof candidate.label === "string" && candidate.label.trim()
+      ? candidate.label.trim()
+      : `Part ${partIndex + 1}`;
+  const id =
+    typeof candidate.id === "string" && candidate.id.trim()
+      ? candidate.id.trim().slice(0, 48)
+      : `part-${partIndex + 1}`;
+
+  if (!text) {
+    throw new Error(`Question ${questionIndex + 1} part ${partIndex + 1} needs text.`);
+  }
+
+  if (answer && answer.length > 10000) {
+    throw new Error(`Question ${questionIndex + 1} part ${partIndex + 1} answer must be 10000 characters or fewer.`);
+  }
+
+  return {
+    id,
+    label,
+    text,
+    code,
+    codeLanguage: codeLanguage?.trim() || undefined,
+    answer: answer || undefined,
+    fraction
+  };
+}
+
 async function parseQuestionUpload(fileList: FileList | null): Promise<Question[]> {
   const files = Array.from(fileList ?? []);
   if (files.length === 0) {
@@ -204,6 +293,7 @@ async function parseQuestionUpload(fileList: FileList | null): Promise<Question[
       language?: unknown;
       minutes?: unknown;
       answer?: unknown;
+      parts?: unknown;
       image?: unknown;
       imageName?: unknown;
       imageAlt?: unknown;
@@ -237,6 +327,30 @@ async function parseQuestionUpload(fileList: FileList | null): Promise<Question[
       throw new Error(`Question ${index + 1} answer must be 10000 characters or fewer.`);
     }
 
+    let parts: QuestionPart[] | undefined;
+    if (candidate.parts !== undefined) {
+      if (!Array.isArray(candidate.parts) || candidate.parts.length === 0) {
+        throw new Error(`Question ${index + 1} parts must be a non-empty array.`);
+      }
+
+      const parsedParts = candidate.parts.map((part, partIndex) => parseUploadPart(part, index, partIndex));
+      const fractions = normalizeFractions(
+        parsedParts.map((part) => part.fraction),
+        `Question ${index + 1} part`
+      );
+      const seenIds = new Set<string>();
+      parts = parsedParts.map((part, partIndex) => {
+        const baseId = part.id || `part-${partIndex + 1}`;
+        const id = seenIds.has(baseId) ? `${baseId}-${partIndex + 1}` : baseId;
+        seenIds.add(id);
+        return {
+          ...part,
+          id,
+          fraction: fractions[partIndex]
+        };
+      });
+    }
+
     let imageFile: File | undefined;
     if (imageReference) {
       imageFile = lookup.get(normalizeUploadPath(imageReference)) ?? lookup.get(basename(imageReference));
@@ -263,6 +377,7 @@ async function parseQuestionUpload(fileList: FileList | null): Promise<Question[
       codeLanguage: codeLanguage?.trim() || undefined,
       minutes,
       answer: answer || undefined,
+      parts,
       imageDataUrl: imageFile ? await readFileAsDataUrl(imageFile) : undefined,
       imageName: imageFile?.name,
       imageAlt: typeof candidate.imageAlt === "string" ? candidate.imageAlt : undefined
@@ -283,6 +398,52 @@ function formatPoints(value: number): string {
   return new Intl.NumberFormat(undefined, {
     maximumFractionDigits: 3
   }).format(value);
+}
+
+function roundPoints(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+function formatPercent(value: number): string {
+  return `${new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 1
+  }).format(value * 100)}%`;
+}
+
+function clampCredit(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(1, value));
+}
+
+function partGradeKey(teamId: string, partId: string): string {
+  return `${teamId}:${partId}`;
+}
+
+function partDisplayLabel(part: QuestionPart, index: number): string {
+  return part.label || `Part ${index + 1}`;
+}
+
+function teamCredit(parts: QuestionPart[], credits: Partial<Record<string, number>> = {}): number {
+  return roundPoints(parts.reduce((sum, part) => sum + part.fraction * clampCredit(credits[part.id] ?? 0), 0));
+}
+
+function gradeFromCredit(credit: number): Grade {
+  return credit >= 0.999 ? "correct" : "incorrect";
+}
+
+function creditLabel(credit: number): string {
+  if (credit >= 0.999) {
+    return "Correct";
+  }
+
+  if (credit <= 0.001) {
+    return "Incorrect";
+  }
+
+  return "Partial";
 }
 
 function csvCell(value: unknown): string {
@@ -307,6 +468,10 @@ function buildResultsCsv(room: PublicRoomState): string {
   const roundHeaders = Array.from({ length: maxRound }, (_item, index) => [
     `R${index + 1} Wager`,
     `R${index + 1} Grade`,
+    `R${index + 1} Credit`,
+    `R${index + 1} Score Delta`,
+    `R${index + 1} Bonus Delta`,
+    `R${index + 1} Part Credits`,
     `R${index + 1} Answer`,
     `R${index + 1} Feedback`,
     `R${index + 1} Protest`,
@@ -355,9 +520,16 @@ function buildResultsCsv(room: PublicRoomState): string {
 
     const roundCells = Array.from({ length: maxRound }, (_item, index) => {
       const result = results[index];
+      const partCredits = result?.partResults
+        ?.map((part) => `${part.label || part.partId}: ${formatPercent(part.credit)}`)
+        .join(" | ");
       return [
         result?.wager ?? "",
         result?.grade ?? "",
+        result?.credit ?? "",
+        result?.scoreDelta ?? "",
+        result?.bonusDelta ?? "",
+        partCredits ?? "",
         result?.answer ?? "",
         result?.aiFeedback ?? "",
         result?.protest?.text ?? "",
@@ -1041,6 +1213,8 @@ function QuestionCard({
     return null;
   }
 
+  const hasExplicitParts = Boolean(question.parts?.length);
+
   return (
     <article className={compact ? "question-card compact" : "question-card"}>
       <div className="question-label">Question {round}</div>
@@ -1057,6 +1231,28 @@ function QuestionCard({
         </div>
       ) : null}
       {showAnswer && question.answer ? <OfficialAnswer answer={question.answer} /> : null}
+      {hasExplicitParts ? (
+        <div className="question-parts">
+          {question.parts?.map((part, index) => (
+            <section className="question-part" key={part.id}>
+              <div className="question-part-head">
+                <strong>{partDisplayLabel(part, index)}</strong>
+                <span>{formatPercent(part.fraction)}</span>
+              </div>
+              <div className="question-text">{part.text}</div>
+              {part.code ? (
+                <div className="question-code-wrap">
+                  {part.codeLanguage ? <div className="code-label">{part.codeLanguage}</div> : null}
+                  <pre className="question-code">
+                    <code>{part.code}</code>
+                  </pre>
+                </div>
+              ) : null}
+              {showAnswer && part.answer ? <OfficialAnswer answer={part.answer} /> : null}
+            </section>
+          ))}
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -1090,6 +1286,7 @@ function QuestionPreviewList({ questions }: { questions: Question[] }) {
                 {question.minutes ? `${question.minutes} min` : "Timer manual"}
                 {question.imageDataUrl ? " · image" : ""}
                 {question.code ? " · code" : ""}
+                {question.parts?.length ? ` · ${question.parts.length} parts` : ""}
                 {question.answer ? " · answer" : ""}
               </span>
             </summary>
@@ -1292,29 +1489,82 @@ function HostGrading({
   request: RequestFn;
   hostPayload: { code: string; hostToken: string };
 }) {
-  const [grades, setGrades] = useState<Record<string, Grade>>({});
+  const question = currentQuestion(room);
+  const parts = questionParts(question);
+  const partSignature = parts.map((part) => part.id).join("|");
+  const [partCredits, setPartCredits] = useState<Record<string, Partial<Record<string, number>>>>({});
   const [reviewing, setReviewing] = useState(false);
   const [status, setStatus] = useState("");
   const [suggestions, setSuggestions] = useState<GradeSuggestion[]>([]);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestionStatus, setSuggestionStatus] = useState("");
   const [suggestionTone, setSuggestionTone] = useState<"info" | "error">("info");
-  const touchedGradeIds = useRef<Set<string>>(new Set());
+  const touchedPartKeys = useRef<Set<string>>(new Set());
   const suggestionRequestId = useRef(0);
   const autoSuggestionKey = useRef("");
 
-  function applySuggestionGrades(nextSuggestions: GradeSuggestion[]): void {
-    setGrades((current) => {
+  function suggestedCreditForPart(suggestion: GradeSuggestion, part: QuestionPart): number | undefined {
+    const partSuggestion = suggestion.partSuggestions?.find((item) => item.partId === part.id);
+    if (partSuggestion) {
+      return partSuggestion.credit;
+    }
+
+    if (typeof suggestion.credit === "number") {
+      return suggestion.credit;
+    }
+
+    return suggestion.grade === "correct" ? 1 : 0;
+  }
+
+  function normalizedPartCredits(): Record<string, Record<string, number>> {
+    return Object.fromEntries(
+      room.teams.map((team) => [
+        team.id,
+        Object.fromEntries(
+          parts.map((part) => [part.id, clampCredit(partCredits[team.id]?.[part.id] ?? 0)])
+        )
+      ])
+    );
+  }
+
+  function gradesFromPartCredits(nextPartCredits: Record<string, Record<string, number>>): Record<string, Grade> {
+    return Object.fromEntries(
+      room.teams.map((team) => [team.id, gradeFromCredit(teamCredit(parts, nextPartCredits[team.id]))])
+    );
+  }
+
+  function applySuggestionCredits(nextSuggestions: GradeSuggestion[]): void {
+    setPartCredits((current) => {
       let changed = false;
       const next = { ...current };
 
       for (const suggestion of nextSuggestions) {
-        if (touchedGradeIds.current.has(suggestion.teamId) || next[suggestion.teamId] !== undefined) {
+        if (!room.teams.some((team) => team.id === suggestion.teamId)) {
           continue;
         }
 
-        next[suggestion.teamId] = suggestion.grade;
-        changed = true;
+        const teamCredits = { ...(next[suggestion.teamId] ?? {}) };
+        let teamChanged = false;
+
+        for (const part of parts) {
+          const key = partGradeKey(suggestion.teamId, part.id);
+          if (touchedPartKeys.current.has(key) || teamCredits[part.id] !== undefined) {
+            continue;
+          }
+
+          const credit = suggestedCreditForPart(suggestion, part);
+          if (credit === undefined) {
+            continue;
+          }
+
+          teamCredits[part.id] = clampCredit(credit);
+          teamChanged = true;
+        }
+
+        if (teamChanged) {
+          next[suggestion.teamId] = teamCredits;
+          changed = true;
+        }
       }
 
       return changed ? next : current;
@@ -1342,37 +1592,64 @@ function HostGrading({
     }
 
     setSuggestions(response.suggestions);
-    applySuggestionGrades(response.suggestions);
+    applySuggestionCredits(response.suggestions);
     setSuggestionTone("info");
     setSuggestionStatus(
       response.suggestions.length > 0
-        ? "Gemma suggestions loaded for unchecked teams."
+        ? "Gemma suggestions loaded for untouched credit boxes."
         : "Gemma did not return grade suggestions."
     );
   }
 
-  function markGrade(teamId: string, grade: Grade): void {
-    touchedGradeIds.current.add(teamId);
-    setGrades((current) => ({ ...current, [teamId]: grade }));
+  function markPartCredit(teamId: string, partId: string, credit: number | undefined): void {
+    touchedPartKeys.current.add(partGradeKey(teamId, partId));
+    setPartCredits((current) => {
+      const nextTeamCredits = { ...(current[teamId] ?? {}) };
+      if (credit === undefined) {
+        delete nextTeamCredits[partId];
+      } else {
+        nextTeamCredits[partId] = clampCredit(credit);
+      }
+
+      return {
+        ...current,
+        [teamId]: nextTeamCredits
+      };
+    });
+  }
+
+  function markTeamCredit(teamId: string, credit: number): void {
+    for (const part of parts) {
+      touchedPartKeys.current.add(partGradeKey(teamId, part.id));
+    }
+
+    setPartCredits((current) => ({
+      ...current,
+      [teamId]: Object.fromEntries(parts.map((part) => [part.id, clampCredit(credit)]))
+    }));
   }
 
   useEffect(() => {
-    const defaults: Record<string, Grade> = {};
+    const defaults: Record<string, Partial<Record<string, number>>> = {};
+    const touched = new Set<string>();
     for (const team of room.teams) {
       if (!team.hasSubmittedAnswer) {
-        defaults[team.id] = "incorrect";
+        defaults[team.id] = Object.fromEntries(parts.map((part) => [part.id, 0]));
+        for (const part of parts) {
+          touched.add(partGradeKey(team.id, part.id));
+        }
       }
     }
-    touchedGradeIds.current = new Set(Object.keys(defaults));
+    touchedPartKeys.current = touched;
     suggestionRequestId.current += 1;
     autoSuggestionKey.current = "";
-    setGrades(defaults);
+    setPartCredits(defaults);
     setSuggestions([]);
     setSuggestionStatus("");
     setSuggestionTone("info");
     setSuggesting(false);
     setReviewing(false);
-  }, [room.currentRound]);
+  }, [room.currentRound, partSignature]);
 
   useEffect(() => {
     if (!room.settings.llmGradingEnabled) {
@@ -1388,13 +1665,19 @@ function HostGrading({
     void requestSuggestions();
   }, [room.code, room.currentRound, room.settings.llmGradingEnabled]);
 
-  const ready = room.teams.every((team) => grades[team.id] === "correct" || grades[team.id] === "incorrect");
+  const ready =
+    parts.length > 0 &&
+    room.teams.every((team) =>
+      parts.every((part) => typeof partCredits[team.id]?.[part.id] === "number")
+    );
   const suggestionByTeam = new Map(suggestions.map((suggestion) => [suggestion.teamId, suggestion]));
 
   async function submitGrades(): Promise<void> {
+    const nextPartCredits = normalizedPartCredits();
+    const grades = gradesFromPartCredits(nextPartCredits);
     const response = await request(
       "answer:grade",
-      { ...hostPayload, grades },
+      { ...hostPayload, grades, partCredits: nextPartCredits },
       room.settings.llmGradingEnabled ? 30000 : undefined
     );
     if (!response.ok) {
@@ -1404,9 +1687,15 @@ function HostGrading({
 
   return (
     <div className="flow-panel">
-      <QuestionCard question={currentQuestion(room)} round={room.currentRound} showAnswer />
+      <QuestionCard question={question} round={room.currentRound} showAnswer />
       {reviewing ? (
-        <GradeReview room={room} grades={grades} onEdit={() => setReviewing(false)} onSubmit={submitGrades} />
+        <GradeReview
+          room={room}
+          parts={parts}
+          partCredits={normalizedPartCredits()}
+          onEdit={() => setReviewing(false)}
+          onSubmit={submitGrades}
+        />
       ) : (
         <>
           <div className="grading-toolbar">
@@ -1421,6 +1710,21 @@ function HostGrading({
           <div className="answer-list">
             {room.teams.map((team) => {
               const suggestion = suggestionByTeam.get(team.id);
+              const credits = partCredits[team.id] ?? {};
+              const totalCredit = teamCredit(parts, credits);
+              const suggestedCredits = Object.fromEntries(
+                (suggestion?.partSuggestions ?? []).map((part) => [part.partId, part.credit])
+              );
+              const suggestionCredit = suggestion
+                ? typeof suggestion.credit === "number"
+                  ? suggestion.credit
+                  : suggestion.partSuggestions?.length
+                    ? teamCredit(parts, suggestedCredits)
+                    : suggestion.grade === "correct"
+                      ? 1
+                      : 0
+                : undefined;
+              const partSuggestionById = new Map((suggestion?.partSuggestions ?? []).map((part) => [part.partId, part]));
               return (
                 <div className="grade-row" key={team.id}>
                   <div>
@@ -1430,7 +1734,8 @@ function HostGrading({
                       <div className="suggestion-note">
                         <Sparkles size={14} />
                         <span>
-                          Gemma: <strong>{suggestion.grade === "correct" ? "Correct" : "Incorrect"}</strong>
+                          Gemma: <strong>{creditLabel(suggestionCredit ?? 0)}</strong>
+                          {suggestionCredit !== undefined ? ` (${formatPercent(suggestionCredit)})` : ""}
                           {typeof suggestion.confidence === "number"
                             ? ` (${Math.round(suggestion.confidence * 100)}%)`
                             : ""}
@@ -1443,24 +1748,63 @@ function HostGrading({
                         Student feedback: {suggestion.feedback}
                       </div>
                     ) : null}
+                    <div className="part-grade-list">
+                      {parts.map((part, index) => {
+                        const credit = credits[part.id];
+                        const partSuggestion = partSuggestionById.get(part.id);
+                        return (
+                          <div className="part-grade-row" key={part.id}>
+                            <label className="part-check">
+                              <input
+                                type="checkbox"
+                                checked={credit !== undefined && credit >= 0.999}
+                                onChange={(event) => markPartCredit(team.id, part.id, event.target.checked ? 1 : 0)}
+                              />
+                              <span>{partDisplayLabel(part, index)}</span>
+                            </label>
+                            <input
+                              aria-label={`${team.name} ${partDisplayLabel(part, index)} partial credit`}
+                              className="credit-input"
+                              type="number"
+                              min={0}
+                              max={1}
+                              step={0.05}
+                              inputMode="decimal"
+                              value={credit ?? ""}
+                              onChange={(event) =>
+                                markPartCredit(
+                                  team.id,
+                                  part.id,
+                                  event.target.value === "" ? undefined : Number(event.target.value)
+                                )
+                              }
+                            />
+                            <span className="part-fraction">{formatPercent(part.fraction)} value</span>
+                            {partSuggestion ? (
+                              <div className="part-suggestion">
+                                <Sparkles size={12} />
+                                <span>
+                                  Gemma {formatPercent(partSuggestion.credit)}
+                                  {partSuggestion.rationale ? ` - ${partSuggestion.rationale}` : ""}
+                                </span>
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div className="grade-actions">
-                    <button
-                      className={grades[team.id] === "correct" ? "grade correct selected" : "grade correct"}
-                      title="Mark correct"
-                      aria-pressed={grades[team.id] === "correct"}
-                      onClick={() => markGrade(team.id, "correct")}
-                    >
-                      <Check size={18} />
-                    </button>
-                    <button
-                      className={grades[team.id] === "incorrect" ? "grade incorrect selected" : "grade incorrect"}
-                      title="Mark incorrect"
-                      aria-pressed={grades[team.id] === "incorrect"}
-                      onClick={() => markGrade(team.id, "incorrect")}
-                    >
-                      <X size={18} />
-                    </button>
+                  <div className="grade-summary">
+                    <strong>{formatPercent(totalCredit)}</strong>
+                    <span>{creditLabel(totalCredit)}</span>
+                    <div className="grade-actions compact">
+                      <button className="secondary" type="button" onClick={() => markTeamCredit(team.id, 1)}>
+                        Full
+                      </button>
+                      <button className="secondary" type="button" onClick={() => markTeamCredit(team.id, 0)}>
+                        Zero
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -1480,12 +1824,14 @@ function HostGrading({
 
 function GradeReview({
   room,
-  grades,
+  parts,
+  partCredits,
   onEdit,
   onSubmit
 }: {
   room: PublicRoomState;
-  grades: Record<string, Grade>;
+  parts: QuestionPart[];
+  partCredits: Record<string, Record<string, number>>;
   onEdit: () => void;
   onSubmit: () => void;
 }) {
@@ -1503,13 +1849,25 @@ function GradeReview({
           <span>Bonus</span>
         </div>
         {room.teams.map((team) => {
-          const grade = grades[team.id];
-          const scoreDelta = grade === "correct" ? team.currentWager ?? 0 : 0;
-          const bonusDelta = grade === "correct" ? room.settings.pointsPerCorrect : 0;
+          const credits = partCredits[team.id] ?? {};
+          const credit = teamCredit(parts, credits);
+          const scoreDelta = roundPoints((team.currentWager ?? 0) * credit);
+          const bonusDelta = roundPoints(room.settings.pointsPerCorrect * credit);
           return (
             <div className="review-row" key={team.id}>
-              <span className="team-name">{team.name}</span>
-              <span>{grade === "correct" ? "Correct" : "Incorrect"}</span>
+              <span className="team-name">
+                {team.name}
+                <small>
+                  {parts.map((part, index) => (
+                    <span key={part.id}>
+                      {partDisplayLabel(part, index)} {formatPercent(credits[part.id] ?? 0)}
+                    </span>
+                  ))}
+                </small>
+              </span>
+              <span>
+                {creditLabel(credit)} ({formatPercent(credit)})
+              </span>
               <span>+{formatPoints(scoreDelta)}</span>
               <span>+{formatPoints(bonusDelta)}</span>
             </div>
@@ -1723,6 +2081,41 @@ function protestStatusLabel(status?: ProtestStatus): string {
   return "Pending";
 }
 
+function resultCredit(result: RoundHistoryEntry["results"][number]): number {
+  return result.credit ?? (result.grade === "correct" ? 1 : 0);
+}
+
+function PartResultList({ result }: { result: RoundHistoryEntry["results"][number] }) {
+  const parts = result.partResults ?? [];
+  const shouldShow =
+    parts.length > 1 ||
+    parts.some((part) => (part.credit > 0.001 && part.credit < 0.999) || Boolean(part.aiFeedback));
+
+  if (!shouldShow) {
+    return null;
+  }
+
+  return (
+    <div className="part-result-list">
+      {parts.map((part, index) => (
+        <div className="part-result-row" key={part.partId}>
+          <div>
+            <strong>{part.label || `Part ${index + 1}`}</strong>
+            <span>{formatPercent(part.fraction)} of question value</span>
+          </div>
+          <div>
+            <strong>{formatPercent(part.credit)}</strong>
+            <span>
+              Score +{formatPoints(part.scoreDelta)} · Bonus +{formatPoints(part.bonusDelta)}
+            </span>
+          </div>
+          {part.aiFeedback ? <p>{part.aiFeedback}</p> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function RoundHistoryPanel({
   room,
   request,
@@ -1758,12 +2151,13 @@ function RoundHistoryPanel({
                     <span>Wager {result.wager ?? "-"}</span>
                   </div>
                   <div className={result.grade === "correct" ? "answer-chip done" : "answer-chip"}>
-                    {result.grade === "correct" ? "Correct" : "Incorrect"}
+                    {creditLabel(resultCredit(result))} · {formatPercent(resultCredit(result))}
                   </div>
                   {result.answer !== undefined ? <div className="answer-text span-history">{result.answer}</div> : null}
                   <div className="history-delta">
                     Score +{formatPoints(result.scoreDelta)} · Bonus +{formatPoints(result.bonusDelta)}
                   </div>
+                  <PartResultList result={result} />
                   {result.aiFeedback ? (
                     <div className="feedback-note">
                       <strong>Feedback</strong>
@@ -1951,6 +2345,7 @@ function TeamFinalizedGrade({
   }
 
   const protestStatus = result.protest?.status ?? "pending";
+  const credit = resultCredit(result);
 
   return (
     <section className="flow-panel">
@@ -1958,12 +2353,14 @@ function TeamFinalizedGrade({
       <div className="finalized-grade">
         <div>
           <span className="eyebrow">Your Grade</span>
-          <h2>{result.grade === "correct" ? "Correct" : "Incorrect"}</h2>
+          <h2>{creditLabel(credit)}</h2>
+          <span className="muted">Credit {formatPercent(credit)}</span>
         </div>
         <div className="history-delta">
           Score +{formatPoints(result.scoreDelta)} · Bonus +{formatPoints(result.bonusDelta)}
         </div>
       </div>
+      <PartResultList result={result} />
       {result.aiFeedback ? (
         <div className="feedback-note">
           <strong>Feedback</strong>

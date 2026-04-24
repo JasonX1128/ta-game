@@ -69,13 +69,29 @@ Status: implemented as a review step before finalizing grades.
 
 While the host is grading, send the question, official answer, and each student answer to Gemma for structured correct/incorrect suggestions.
 
-The suggestions prefill only untouched grade buttons, never finalize grades, and never overwrite a host choice made before the AI response returns.
+The suggestions prefill only untouched grade controls, never finalize grades, and never overwrite a host choice made before the AI response returns.
 
 Gemma also returns concise student-facing feedback for each team. Feedback is stored with the finalized round and shown to that team after grades are released.
 
 Hosts must enable this per room with the server-side `LLM_GRADING_PASSWORD` so public rooms cannot spend the configured Gemma API key by default.
 
 Status: implemented as a host-only grading aid.
+
+### Multipart Questions
+
+Uploaded questions can include graded subparts with their own text, optional code, optional official answers, and optional value fractions.
+
+If fractions are omitted, the app divides the question value uniformly across parts. If some fractions are provided, the remaining value is divided across the unweighted parts.
+
+Status: implemented in upload parsing, question rendering, host grading, Gemma suggestions, round history, and CSV export.
+
+### Partial Credit
+
+Hosts can type decimal credit from `0` to `1` for each question part.
+
+Score is calculated as `wager * part fraction * partial credit`; bonus answer points use the same credit fraction. Gemma can also suggest decimal credit per part, but the host still finalizes every grade.
+
+Status: implemented for host grading, Gemma suggestions, results, history, and exports.
 
 ### Answer Reveal Mode
 

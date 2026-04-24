@@ -595,6 +595,38 @@ h2 {
   white-space: pre;
 }
 
+.question-parts {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.question-part {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  padding: 12px;
+}
+
+.question-part-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.question-part-head strong {
+  overflow-wrap: anywhere;
+}
+
+.question-part-head span,
+.part-fraction {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .official-answer {
   border-top: 1px solid var(--line);
   margin-top: 12px;
@@ -617,6 +649,7 @@ h2 {
 
 .grade-row {
   grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
 }
 
 .grading-toolbar {
@@ -672,6 +705,84 @@ h2 {
 .grade-actions {
   display: flex;
   gap: 8px;
+}
+
+.grade-actions.compact {
+  margin-top: 8px;
+}
+
+.grade-actions.compact button {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.grade-summary {
+  min-width: 116px;
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+
+.grade-summary strong {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.grade-summary span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.part-grade-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-left: 14px;
+  border-left: 2px solid #e8eeeb;
+}
+
+.part-grade-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) 96px auto;
+  align-items: center;
+  gap: 9px;
+}
+
+.part-check {
+  display: inline-flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--ink);
+}
+
+.part-check input {
+  width: auto;
+}
+
+.part-check span {
+  overflow-wrap: anywhere;
+}
+
+.credit-input {
+  padding: 8px 9px;
+}
+
+.part-suggestion {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  color: #294766;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.part-suggestion svg {
+  margin-top: 2px;
+  flex: 0 0 auto;
 }
 
 .grade {
@@ -863,6 +974,16 @@ h2 {
   padding: 10px 12px;
 }
 
+.review-row .team-name small {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
 .review-head {
   min-height: auto;
   color: var(--muted);
@@ -933,6 +1054,42 @@ h2 {
 .history-delta {
   grid-column: 1 / -1;
   font-weight: 800;
+}
+
+.part-result-list {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 7px;
+}
+
+.part-result-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, auto);
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  padding: 9px;
+}
+
+.part-result-row strong,
+.part-result-row span {
+  display: block;
+}
+
+.part-result-row span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+
+.part-result-row p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #294766;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
 }
 
 .finalized-grade {
@@ -1095,8 +1252,17 @@ h2 {
   }
 
   .podium,
-  .review-row {
+  .review-row,
+  .part-result-row {
     grid-template-columns: 1fr;
+  }
+
+  .part-grade-row {
+    grid-template-columns: minmax(0, 1fr) 86px;
+  }
+
+  .part-fraction {
+    grid-column: 1 / -1;
   }
 }
 
@@ -1128,6 +1294,14 @@ h2 {
 
   .grade-actions {
     width: 100%;
+  }
+
+  .grade-summary {
+    justify-items: start;
+  }
+
+  .part-grade-list {
+    padding-left: 10px;
   }
 
   .grading-toolbar {
