@@ -1599,7 +1599,6 @@ function HostGrading({
   const [copiedDebugKey, setCopiedDebugKey] = useState("");
   const touchedPartKeys = useRef<Set<string>>(new Set());
   const suggestionRequestId = useRef(0);
-  const autoSuggestionKey = useRef("");
 
   function suggestedCreditForPart(suggestion: GradeSuggestion, part: QuestionPart): number | undefined {
     const partSuggestion = suggestion.partSuggestions?.find((item) => item.partId === part.id);
@@ -1688,12 +1687,12 @@ function HostGrading({
     });
   }
 
-  async function requestSuggestions(manual = false): Promise<void> {
+  async function requestSuggestions(): Promise<void> {
     const requestId = suggestionRequestId.current + 1;
     suggestionRequestId.current = requestId;
     setSuggesting(true);
     setSuggestionTone("info");
-    setSuggestionStatus(manual ? "Asking Gemma again..." : "Asking Gemma for suggestions...");
+    setSuggestionStatus("Asking Gemma for suggestions...");
 
     const round = room.currentRound;
     const suggestionTimeoutMs = Math.max(60000, 15000 + room.teams.length * 15000);
@@ -1778,7 +1777,6 @@ function HostGrading({
     }
     touchedPartKeys.current = touched;
     suggestionRequestId.current += 1;
-    autoSuggestionKey.current = "";
     setPartCredits(defaults);
     setSuggestions([]);
     setSuggestionStatus("");
@@ -1788,20 +1786,6 @@ function HostGrading({
     setCopiedDebugKey("");
     setReviewing(false);
   }, [room.currentRound, partSignature]);
-
-  useEffect(() => {
-    if (!room.settings.llmGradingEnabled) {
-      return;
-    }
-
-    const key = `${room.code}:${room.currentRound}`;
-    if (autoSuggestionKey.current === key) {
-      return;
-    }
-
-    autoSuggestionKey.current = key;
-    void requestSuggestions();
-  }, [room.code, room.currentRound, room.settings.llmGradingEnabled]);
 
   const ready =
     parts.length > 0 &&
@@ -1839,7 +1823,7 @@ function HostGrading({
           <div className="grading-toolbar">
             <div className="eyebrow">Host Grading</div>
             {room.settings.llmGradingEnabled ? (
-              <button className="secondary" disabled={suggesting} onClick={() => requestSuggestions(true)}>
+              <button className="secondary" disabled={suggesting} onClick={() => requestSuggestions()}>
                 <Sparkles size={18} />
                 {suggesting ? "Suggesting" : "Suggest Grades"}
               </button>
