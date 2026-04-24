@@ -57,6 +57,7 @@ type RoomRecord = {
   phase: PublicRoomState["phase"];
   settings: GameSettings;
   baseQuestions: Question[];
+  hostGemmaApiKey?: string;
   teams: TeamRecord[];
   currentRound: number;
   roundDurationSeconds?: number;
@@ -719,18 +720,37 @@ function validateSettings(settings: Partial<GameSettings>): GameSettings | strin
   };
 }
 
-function validateLlmGradingUnlock(room: RoomRecord, enabled: boolean, password: unknown): string | undefined {
+function normalizeHostGemmaApiKey(value: unknown): string | undefined {
+  const key = typeof value === "string" ? value.trim() : "";
+  return key || undefined;
+}
+
+function validateLlmGradingUnlock(
+  room: RoomRecord,
+  enabled: boolean,
+  password: unknown,
+  hostGemmaApiKey: unknown
+): string | undefined {
   if (!enabled || room.settings.llmGradingEnabled) {
+    return undefined;
+  }
+
+  if (normalizeHostGemmaApiKey(hostGemmaApiKey)) {
     return undefined;
   }
 
   const configuredPassword = process.env.LLM_GRADING_PASSWORD;
   if (!configuredPassword) {
-    return "LLM_GRADING_PASSWORD is not configured on the server.";
+    return "Enter the LLM grading password or provide a Gemini API key for this room.";
   }
 
-  if (String(password ?? "") !== configuredPassword) {
-    return "LLM grading password is incorrect.";
+  const providedPassword = String(password ?? "");
+  if (!providedPassword) {
+    return "Enter the LLM grading password or provide a Gemini API key for this room.";
+  }
+
+  if (providedPassword !== configuredPassword) {
+    return "LLM grading password is incorrect. You can also provide your own Gemini API key.";
   }
 
   return undefined;
@@ -1192,9 +1212,9 @@ function stringifyForDebug(value: unknown): string {
 async function requestGemmaGradeSuggestions(
   room: RoomRecord
 ): Promise<{ suggestions: GradeSuggestion[]; debugBatches: GemmaDebugBatch[] }> {
-  const apiKey = process.env.GEMMA_API_KEY;
+  const apiKey = room.hostGemmaApiKey || process.env.GEMMA_API_KEY;
   if (!apiKey) {
-    throw new Error("GEMMA_API_KEY is not configured.");
+    throw new Error("No Gemini API key is configured for this room.");
   }
 
   const gemmaApiKey = apiKey;
@@ -1640,15 +1660,6 @@ function moveToGrading(room: RoomRecord): void {
   room.phase = "grading";
   room.roundEndsAt = Date.now();
   room.gradeSuggestionCache = undefined;
-  if (room.settings.llmGradingEnabled) {
-    const round = room.currentRound;
-    const timer = setTimeout(() => {
-      if (room.phase === "grading" && room.currentRound === round && room.settings.llmGradingEnabled) {
-        void cachedGemmaGradeSuggestions(room).catch(() => undefined);
-      }
-    }, DRAFT_GRACE_MS);
-    timer.unref?.();
-  }
   touch(room);
 }
 
@@ -1832,6 +1843,7 @@ io.on("connection", (socket) => {
         hostToken?: unknown;
         settings?: Partial<GameSettings>;
         llmGradingPassword?: unknown;
+        hostGemmaApiKey?: unknown;
       },
       ack?: AckCallback
     ) => {
@@ -1851,10 +1863,21 @@ io.on("connection", (socket) => {
         return;
       }
 
-      const llmUnlockError = validateLlmGradingUnlock(room, validated.llmGradingEnabled, payload.llmGradingPassword);
+      const llmUnlockError = validateLlmGradingUnlock(
+        room,
+        validated.llmGradingEnabled,
+        payload.llmGradingPassword,
+        payload.hostGemmaApiKey
+      );
       if (llmUnlockError) {
         fail(socket, ack, llmUnlockError);
         return;
+      }
+
+      if (validated.llmGradingEnabled && !room.settings.llmGradingEnabled) {
+        room.hostGemmaApiKey = normalizeHostGemmaApiKey(payload.hostGemmaApiKey);
+      } else if (!validated.llmGradingEnabled) {
+        room.hostGemmaApiKey = undefined;
       }
 
       room.baseQuestions = cloneQuestions(validated.questions);
@@ -2193,9 +2216,6 @@ io.on("connection", (socket) => {
         if (answer.trim()) {
           team.currentAnswer = answer;
           room.gradeSuggestionCache = undefined;
-          if (room.settings.llmGradingEnabled) {
-            void cachedGemmaGradeSuggestions(room).catch(() => undefined);
-          }
           touch(room);
           ok(ack, {});
           broadcastState(room);

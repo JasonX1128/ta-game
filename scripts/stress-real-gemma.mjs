@@ -7,6 +7,7 @@ const teamCount = Number(process.env.STRESS_TEAM_COUNT ?? 8);
 const suggestTimeoutMs = Number(process.env.STRESS_SUGGEST_TIMEOUT_MS ?? 180000);
 const finalizeTimeoutMs = Number(process.env.STRESS_FINALIZE_TIMEOUT_MS ?? 10000);
 const llmPassword = process.env.LLM_GRADING_PASSWORD || "stress-test-password";
+const useHostApiKey = process.env.STRESS_CREDENTIAL_MODE === "apiKey";
 
 if (!process.env.GEMMA_API_KEY) {
   throw new Error("Set GEMMA_API_KEY in .env before running this stress test.");
@@ -81,7 +82,8 @@ const game = spawn("./node_modules/.bin/tsx", ["src/server/index.ts"], {
   env: {
     ...process.env,
     PORT: String(port),
-    LLM_GRADING_PASSWORD: llmPassword
+    LLM_GRADING_PASSWORD: llmPassword,
+    ...(useHostApiKey ? { GEMMA_API_KEY: "" } : {})
   },
   stdio: ["ignore", "pipe", "pipe"]
 });
@@ -122,7 +124,8 @@ try {
   const updated = await request(host, "settings:update", {
     ...hostPayload,
     settings,
-    llmGradingPassword: llmPassword
+    llmGradingPassword: useHostApiKey ? undefined : llmPassword,
+    hostGemmaApiKey: useHostApiKey ? process.env.GEMMA_API_KEY : undefined
   });
   if (!updated.ok) throw new Error(updated.message);
 
@@ -178,6 +181,7 @@ try {
 
   console.log(JSON.stringify({
     teamCount,
+    credentialMode: useHostApiKey ? "apiKey" : "password",
     suggestionOk: suggestionResult.ok,
     suggestionElapsedMs,
     suggestionCount: suggestionResult.ok ? suggestionResult.suggestions.length : undefined,

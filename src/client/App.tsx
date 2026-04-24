@@ -906,7 +906,9 @@ function HostLobby({
   );
   const [llmGradingEnabled, setLlmGradingEnabled] = useState(room.settings.llmGradingEnabled);
   const [showFullGemmaResponse, setShowFullGemmaResponse] = useState(room.settings.showFullGemmaResponse);
+  const [llmCredentialMode, setLlmCredentialMode] = useState<"password" | "apiKey">("password");
   const [llmGradingPassword, setLlmGradingPassword] = useState("");
+  const [hostGemmaApiKey, setHostGemmaApiKey] = useState("");
   const [status, setStatus] = useState("");
   const [uploadStatus, setUploadStatus] = useState("");
   const uploadedQuestionCount = room.settings.questions.length;
@@ -922,6 +924,7 @@ function HostLobby({
     setShowFullGemmaResponse(room.settings.showFullGemmaResponse);
     if (room.settings.llmGradingEnabled) {
       setLlmGradingPassword("");
+      setHostGemmaApiKey("");
     }
   }, [
     room.settings.questionCount,
@@ -939,7 +942,13 @@ function HostLobby({
       ...hostPayload,
       settings,
       llmGradingPassword:
-        settings.llmGradingEnabled && !room.settings.llmGradingEnabled ? llmGradingPassword : undefined
+        settings.llmGradingEnabled && !room.settings.llmGradingEnabled && llmCredentialMode === "password"
+          ? llmGradingPassword
+          : undefined,
+      hostGemmaApiKey:
+        settings.llmGradingEnabled && !room.settings.llmGradingEnabled && llmCredentialMode === "apiKey"
+          ? hostGemmaApiKey
+          : undefined
     };
   }
 
@@ -1121,15 +1130,39 @@ function HostLobby({
               Show full Gemma response while grading (host-only debug)
             </label>
             {llmGradingEnabled && !room.settings.llmGradingEnabled ? (
-              <label className="span-2">
-                LLM grading password
-                <input
-                  type="password"
-                  value={llmGradingPassword}
-                  autoComplete="off"
-                  onChange={(event) => setLlmGradingPassword(event.target.value)}
-                />
-              </label>
+              <div className="span-2 settings-subgrid">
+                <label>
+                  LLM credential
+                  <select
+                    value={llmCredentialMode}
+                    onChange={(event) => setLlmCredentialMode(event.target.value as "password" | "apiKey")}
+                  >
+                    <option value="password">Use room password</option>
+                    <option value="apiKey">Use my Gemini API key</option>
+                  </select>
+                </label>
+                {llmCredentialMode === "password" ? (
+                  <label>
+                    LLM grading password
+                    <input
+                      type="password"
+                      value={llmGradingPassword}
+                      autoComplete="off"
+                      onChange={(event) => setLlmGradingPassword(event.target.value)}
+                    />
+                  </label>
+                ) : (
+                  <label>
+                    Gemini API key
+                    <input
+                      type="password"
+                      value={hostGemmaApiKey}
+                      autoComplete="off"
+                      onChange={(event) => setHostGemmaApiKey(event.target.value)}
+                    />
+                  </label>
+                )}
+              </div>
             ) : null}
             {room.settings.llmGradingEnabled ? (
               <div className="settings-note span-2">LLM grading suggestions are enabled for this room.</div>
