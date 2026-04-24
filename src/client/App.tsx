@@ -617,6 +617,8 @@ function HostLobby({
   const [hideLeaderboardDuringAnswering, setHideLeaderboardDuringAnswering] = useState(
     room.settings.hideLeaderboardDuringAnswering
   );
+  const [llmGradingEnabled, setLlmGradingEnabled] = useState(room.settings.llmGradingEnabled);
+  const [llmGradingPassword, setLlmGradingPassword] = useState("");
   const [status, setStatus] = useState("");
   const [uploadStatus, setUploadStatus] = useState("");
   const uploadedQuestionCount = room.settings.questions.length;
@@ -627,13 +629,27 @@ function HostLobby({
     setBonusText(room.settings.bonusByRank.join(","));
     setAnswerRevealMode(room.settings.answerRevealMode);
     setHideLeaderboardDuringAnswering(room.settings.hideLeaderboardDuringAnswering);
+    setLlmGradingEnabled(room.settings.llmGradingEnabled);
+    if (room.settings.llmGradingEnabled) {
+      setLlmGradingPassword("");
+    }
   }, [
     room.settings.questionCount,
     room.settings.pointsPerCorrect,
     room.settings.bonusByRank.join(","),
     room.settings.answerRevealMode,
-    room.settings.hideLeaderboardDuringAnswering
+    room.settings.hideLeaderboardDuringAnswering,
+    room.settings.llmGradingEnabled
   ]);
+
+  function settingsPayload(settings: GameSettings): unknown {
+    return {
+      ...hostPayload,
+      settings,
+      llmGradingPassword:
+        settings.llmGradingEnabled && !room.settings.llmGradingEnabled ? llmGradingPassword : undefined
+    };
+  }
 
   async function saveSettings(event: FormEvent): Promise<void> {
     event.preventDefault();
@@ -649,10 +665,11 @@ function HostLobby({
       bonusByRank,
       questions: room.settings.questions,
       answerRevealMode,
-      hideLeaderboardDuringAnswering
+      hideLeaderboardDuringAnswering,
+      llmGradingEnabled
     };
 
-    const response = await request("settings:update", { ...hostPayload, settings });
+    const response = await request("settings:update", settingsPayload(settings));
     setStatus(response.ok ? "Settings saved." : response.message);
   }
 
@@ -667,17 +684,17 @@ function HostLobby({
         return;
       }
 
-      const response = await request("settings:update", {
-        ...hostPayload,
-        settings: {
-          questionCount: questions.length,
-          pointsPerCorrect: Number(pointsPerCorrect),
-          bonusByRank,
-          questions,
-          answerRevealMode,
-          hideLeaderboardDuringAnswering
-        } satisfies GameSettings
-      });
+      const settings: GameSettings = {
+        questionCount: questions.length,
+        pointsPerCorrect: Number(pointsPerCorrect),
+        bonusByRank,
+        questions,
+        answerRevealMode,
+        hideLeaderboardDuringAnswering,
+        llmGradingEnabled
+      };
+
+      const response = await request("settings:update", settingsPayload(settings));
 
       setUploadStatus(response.ok ? `Loaded ${questions.length} questions.` : response.message);
     } catch (error) {
@@ -692,17 +709,17 @@ function HostLobby({
       return;
     }
 
-    const response = await request("settings:update", {
-      ...hostPayload,
-      settings: {
-        questionCount: Math.max(1, Number(questionCount) || room.settings.questionCount),
-        pointsPerCorrect: Number(pointsPerCorrect),
-        bonusByRank,
-        questions: [],
-        answerRevealMode,
-        hideLeaderboardDuringAnswering
-      } satisfies GameSettings
-    });
+    const settings: GameSettings = {
+      questionCount: Math.max(1, Number(questionCount) || room.settings.questionCount),
+      pointsPerCorrect: Number(pointsPerCorrect),
+      bonusByRank,
+      questions: [],
+      answerRevealMode,
+      hideLeaderboardDuringAnswering,
+      llmGradingEnabled
+    };
+
+    const response = await request("settings:update", settingsPayload(settings));
 
     setUploadStatus(response.ok ? "Questions cleared." : response.message);
   }
@@ -781,6 +798,28 @@ function HostLobby({
               />
               Hide team leaderboard while answering
             </label>
+            <label className="checkbox-label span-2">
+              <input
+                type="checkbox"
+                checked={llmGradingEnabled}
+                onChange={(event) => setLlmGradingEnabled(event.target.checked)}
+              />
+              Enable LLM grading suggestions
+            </label>
+            {llmGradingEnabled && !room.settings.llmGradingEnabled ? (
+              <label className="span-2">
+                LLM grading password
+                <input
+                  type="password"
+                  value={llmGradingPassword}
+                  autoComplete="off"
+                  onChange={(event) => setLlmGradingPassword(event.target.value)}
+                />
+              </label>
+            ) : null}
+            {room.settings.llmGradingEnabled ? (
+              <div className="settings-note span-2">LLM grading suggestions are enabled for this room.</div>
+            ) : null}
           </div>
           <div className="upload-panel">
             <div>
@@ -1180,6 +1219,10 @@ function HostGrading({
   }, [room.currentRound]);
 
   useEffect(() => {
+    if (!room.settings.llmGradingEnabled) {
+      return;
+    }
+
     const key = `${room.code}:${room.currentRound}`;
     if (autoSuggestionKey.current === key) {
       return;
@@ -1187,7 +1230,7 @@ function HostGrading({
 
     autoSuggestionKey.current = key;
     void requestSuggestions();
-  }, [room.code, room.currentRound]);
+  }, [room.code, room.currentRound, room.settings.llmGradingEnabled]);
 
   const ready = room.teams.every((team) => grades[team.id] === "correct" || grades[team.id] === "incorrect");
   const suggestionByTeam = new Map(suggestions.map((suggestion) => [suggestion.teamId, suggestion]));
@@ -1208,10 +1251,12 @@ function HostGrading({
         <>
           <div className="grading-toolbar">
             <div className="eyebrow">Host Grading</div>
-            <button className="secondary" disabled={suggesting} onClick={() => requestSuggestions(true)}>
-              <Sparkles size={18} />
-              {suggesting ? "Suggesting" : "Suggest Grades"}
-            </button>
+            {room.settings.llmGradingEnabled ? (
+              <button className="secondary" disabled={suggesting} onClick={() => requestSuggestions(true)}>
+                <Sparkles size={18} />
+                {suggesting ? "Suggesting" : "Suggest Grades"}
+              </button>
+            ) : null}
           </div>
           <div className="answer-list">
             {room.teams.map((team) => {

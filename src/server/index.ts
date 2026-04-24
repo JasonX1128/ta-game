@@ -92,7 +92,8 @@ function cloneSettings(settings: GameSettings = DEFAULT_SETTINGS): GameSettings 
     bonusByRank: [...settings.bonusByRank],
     questions: settings.questions.map((question) => ({ ...question })),
     answerRevealMode: settings.answerRevealMode,
-    hideLeaderboardDuringAnswering: settings.hideLeaderboardDuringAnswering
+    hideLeaderboardDuringAnswering: settings.hideLeaderboardDuringAnswering,
+    llmGradingEnabled: settings.llmGradingEnabled
   };
 }
 
@@ -474,6 +475,7 @@ function validateSettings(settings: Partial<GameSettings>): GameSettings | strin
   const bonusByRank = Array.isArray(settings.bonusByRank) ? settings.bonusByRank : [];
   const answerRevealMode = String(settings.answerRevealMode ?? DEFAULT_SETTINGS.answerRevealMode);
   const hideLeaderboardDuringAnswering = Boolean(settings.hideLeaderboardDuringAnswering);
+  const llmGradingEnabled = Boolean(settings.llmGradingEnabled);
   const questions = validateQuestions(settings.questions);
 
   if (typeof questions === "string") {
@@ -509,8 +511,26 @@ function validateSettings(settings: Partial<GameSettings>): GameSettings | strin
     bonusByRank: parsedBonuses,
     questions,
     answerRevealMode: answerRevealMode as AnswerRevealMode,
-    hideLeaderboardDuringAnswering
+    hideLeaderboardDuringAnswering,
+    llmGradingEnabled
   };
+}
+
+function validateLlmGradingUnlock(room: RoomRecord, enabled: boolean, password: unknown): string | undefined {
+  if (!enabled || room.settings.llmGradingEnabled) {
+    return undefined;
+  }
+
+  const configuredPassword = process.env.LLM_GRADING_PASSWORD;
+  if (!configuredPassword) {
+    return "LLM_GRADING_PASSWORD is not configured on the server.";
+  }
+
+  if (String(password ?? "") !== configuredPassword) {
+    return "LLM grading password is incorrect.";
+  }
+
+  return undefined;
 }
 
 function extractGemmaText(response: unknown): string | undefined {
@@ -890,7 +910,15 @@ io.on("connection", (socket) => {
 
   socket.on(
     "settings:update",
-    (payload: { code?: unknown; hostToken?: unknown; settings?: Partial<GameSettings> }, ack?: AckCallback) => {
+    (
+      payload: {
+        code?: unknown;
+        hostToken?: unknown;
+        settings?: Partial<GameSettings>;
+        llmGradingPassword?: unknown;
+      },
+      ack?: AckCallback
+    ) => {
       const room = requireHost(socket, ack, payload);
       if (!room) {
         return;
@@ -904,6 +932,12 @@ io.on("connection", (socket) => {
       const validated = validateSettings(payload.settings ?? {});
       if (typeof validated === "string") {
         fail(socket, ack, validated);
+        return;
+      }
+
+      const llmUnlockError = validateLlmGradingUnlock(room, validated.llmGradingEnabled, payload.llmGradingPassword);
+      if (llmUnlockError) {
+        fail(socket, ack, llmUnlockError);
         return;
       }
 
@@ -1204,6 +1238,11 @@ io.on("connection", (socket) => {
 
       if (room.phase !== "grading") {
         fail(socket, ack, "AI suggestions are available while grading answers.");
+        return;
+      }
+
+      if (!room.settings.llmGradingEnabled) {
+        fail(socket, ack, "LLM grading suggestions are disabled for this room.");
         return;
       }
 

@@ -65,6 +65,8 @@ While the host is grading, send the question, official answer, and each student 
 
 The suggestions prefill only untouched grade buttons, never finalize grades, and never overwrite a host choice made before the AI response returns.
 
+Hosts must enable this per room with the server-side `LLM_GRADING_PASSWORD` so public rooms cannot spend the configured Gemma API key by default.
+
 Status: implemented as a host-only grading aid.
 
 ### Answer Reveal Mode

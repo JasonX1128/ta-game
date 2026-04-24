@@ -26,6 +26,7 @@ export type GameSettings = {
   questions: Question[];
   answerRevealMode: AnswerRevealMode;
   hideLeaderboardDuringAnswering: boolean;
+  llmGradingEnabled: boolean;
 };
 
 export type Question = {
@@ -128,5 +129,6 @@ export const DEFAULT_SETTINGS: GameSettings = {
   bonusByRank: [10, 5, 2],
   questions: [],
   answerRevealMode: "host_only",
-  hideLeaderboardDuringAnswering: false
+  hideLeaderboardDuringAnswering: false,
+  llmGradingEnabled: false
 };
