@@ -112,6 +112,7 @@ button {
 
 .lobby-layout {
   grid-template-columns: minmax(0, 1fr) 320px;
+  align-items: start;
 }
 
 .game-grid {
@@ -153,6 +154,7 @@ button {
 .side-stack {
   display: grid;
   gap: 12px;
+  align-content: start;
 }
 
 .panel-title {
@@ -381,6 +383,7 @@ button:disabled {
 .team-list {
   display: grid;
   gap: 8px;
+  align-content: start;
 }
 
 .team-row,
