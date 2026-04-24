@@ -66,10 +66,10 @@ Confirmed rule:
   - It does not add flat answer points.
   - The team effectively loses that wager opportunity for `+0`.
 - Leaderboard ranking is based on `correctWagerTotal`.
-- Display score as:
-  - `correctWagerTotal (+bonus)`, with answer points available as a secondary stat if useful.
-- Final/overall score can be computed as:
-  - `correctWagerTotal + rankingBonus + answerPoints`
+- Display two separate values:
+  - **Score:** `correctWagerTotal`, the sum of correct wagers.
+  - **Bonus points:** `answerPoints + rankingBonus`, used outside the game grade.
+- Do not add ranking bonus or flat correct-answer points into the in-game score.
 
 ## Room Lifecycle
 

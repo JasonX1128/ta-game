@@ -143,7 +143,7 @@ function calculateLeaderboard(room: RoomRecord): LeaderboardEntry[] {
         correctWagerTotal: team.correctWagerTotal,
         answerPoints: team.answerPoints,
         rankBonus,
-        finalScore: team.correctWagerTotal + team.answerPoints + rankBonus
+        bonusPoints: team.answerPoints + rankBonus
       };
     });
 }
@@ -169,7 +169,7 @@ function publicState(room: RoomRecord, context: SocketContext): PublicRoomState 
       correctWagerTotal: team.correctWagerTotal,
       answerPoints: team.answerPoints,
       rankBonus: entry?.rankBonus ?? 0,
-      finalScore: entry?.finalScore ?? team.correctWagerTotal + team.answerPoints
+      bonusPoints: entry?.bonusPoints ?? team.answerPoints
     };
   });
 

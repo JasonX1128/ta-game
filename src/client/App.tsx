@@ -886,8 +886,6 @@ function AnswerTable({ teams }: { teams: PublicTeam[] }) {
 }
 
 function Leaderboard({ room }: { room: PublicRoomState }) {
-  const showFinalTotal = room.phase === "finished";
-
   return (
     <aside className="leaderboard">
       <div className="panel-title">
@@ -899,27 +897,27 @@ function Leaderboard({ room }: { room: PublicRoomState }) {
           <div className="empty-state">No teams yet.</div>
         ) : (
           room.leaderboard.map((entry) => (
-            <div className={showFinalTotal ? "leader-row has-total" : "leader-row"} key={entry.teamId}>
+            <div className="leader-row" key={entry.teamId}>
               <span className="rank">{entry.rank}</span>
-              <span className="leader-name">
-                {entry.name}
-                <small>Correct pts {formatPoints(entry.answerPoints)}</small>
+              <span className="leader-name">{entry.name}</span>
+              <span className="leader-stat">
+                <small>Score</small>
+                <strong>{formatPoints(entry.correctWagerTotal)}</strong>
               </span>
-              <span className="leader-score">
-                {formatPoints(entry.correctWagerTotal)} <em>(+{formatPoints(entry.rankBonus)})</em>
+              <span className="leader-stat bonus">
+                <small>Bonus</small>
+                <strong>{formatPoints(entry.bonusPoints)}</strong>
+                <em>
+                  {formatPoints(entry.answerPoints)} + {formatPoints(entry.rankBonus)}
+                </em>
               </span>
-              {showFinalTotal ? <span className="leader-total">{formatPoints(entry.finalScore)}</span> : null}
             </div>
           ))
         )}
       </div>
       <div className="score-key">
-        <span>Rank uses correct wager score; rank bonus is in parentheses.</span>
-        <span>
-          {showFinalTotal
-            ? "Final total includes correct-answer points and bonus."
-            : "Correct-answer points only increase on correct grades."}
-        </span>
+        <span>Score is the sum of correct wagers.</span>
+        <span>Bonus points are correct-answer points plus rank bonus.</span>
       </div>
     </aside>
   );

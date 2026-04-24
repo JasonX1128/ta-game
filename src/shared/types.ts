@@ -29,7 +29,7 @@ export type PublicTeam = {
   correctWagerTotal: number;
   answerPoints: number;
   rankBonus: number;
-  finalScore: number;
+  bonusPoints: number;
 };
 
 export type LeaderboardEntry = {
@@ -39,7 +39,7 @@ export type LeaderboardEntry = {
   correctWagerTotal: number;
   answerPoints: number;
   rankBonus: number;
-  finalScore: number;
+  bonusPoints: number;
 };
 
 export type PublicRoomState = {
