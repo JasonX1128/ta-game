@@ -580,7 +580,7 @@ async function requestGemmaGradeSuggestions(room: RoomRecord): Promise<GradeSugg
     throw new Error("GEMMA_API_KEY is not configured.");
   }
 
-  const model = process.env.GEMMA_MODEL || "gemma-4-26b-a4b-it";
+  const model = process.env.GEMMA_MODEL || "gemma-4-31b-it";
   const apiBase = process.env.GEMMA_API_BASE || "https://generativelanguage.googleapis.com/v1beta";
   const modelPath = model.startsWith("models/") ? model : `models/${model}`;
   const question = room.settings.questions[room.currentRound - 1];
