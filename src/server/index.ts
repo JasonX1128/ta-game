@@ -1043,6 +1043,21 @@ function fillMissingGemmaPartSuggestions(
   });
 }
 
+function dedupeGradeSuggestions(suggestions: GradeSuggestion[]): GradeSuggestion[] {
+  const byTeamId = new Map<string, GradeSuggestion>();
+
+  for (const suggestion of suggestions) {
+    const existing = byTeamId.get(suggestion.teamId);
+    const existingConfidence = existing?.confidence ?? -1;
+    const nextConfidence = suggestion.confidence ?? -1;
+    if (!existing || nextConfidence >= existingConfidence) {
+      byTeamId.set(suggestion.teamId, suggestion);
+    }
+  }
+
+  return [...byTeamId.values()];
+}
+
 function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>, parts: QuestionPart[]): GradeSuggestion[] {
   const parsed = parseJsonFromModelText(rawText);
   const suggestions = Array.isArray(parsed)
@@ -1123,7 +1138,7 @@ function parseGemmaSuggestions(rawText: string, validTeamIds: Set<string>, parts
     throw new Error("AI response did not include suggestions for the current teams.");
   }
 
-  return parsedSuggestions;
+  return dedupeGradeSuggestions(parsedSuggestions);
 }
 
 function wait(ms: number): Promise<void> {
@@ -1139,6 +1154,27 @@ function chunkArray<T>(items: T[], size: number): T[][] {
   }
 
   return chunks;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.max(1, Math.min(Math.floor(concurrency), items.length));
+
+  async function runWorker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+  return results;
 }
 
 function stringifyForDebug(value: unknown): string {
@@ -1161,9 +1197,11 @@ async function requestGemmaGradeSuggestions(
     throw new Error("GEMMA_API_KEY is not configured.");
   }
 
+  const gemmaApiKey = apiKey;
   const model = process.env.GEMMA_MODEL || "gemma-4-31b-it";
+  const fallbackModel = process.env.GEMMA_FALLBACK_MODEL || "gemma-3-27b-it";
   const apiBase = process.env.GEMMA_API_BASE || "https://generativelanguage.googleapis.com/v1beta";
-  const modelPath = model.startsWith("models/") ? model : `models/${model}`;
+  const requestTimeoutMs = Math.max(1000, Number(process.env.GEMMA_REQUEST_TIMEOUT_MS ?? 30000) || 30000);
   const question = room.settings.questions[room.currentRound - 1];
   const parts = questionParts(question);
   const teams = room.teams.map((team) => ({
@@ -1174,9 +1212,19 @@ async function requestGemmaGradeSuggestions(
   }));
   const batchSize = Math.max(1, Math.ceil(teams.length / 15));
   const teamBatches = chunkArray(teams, batchSize);
+  const batchConcurrency = Math.max(1, Number(process.env.GEMMA_BATCH_CONCURRENCY ?? teamBatches.length) || teamBatches.length);
   const includeDebug = room.settings.showFullGemmaResponse;
 
-  const url = `${apiBase.replace(/\/$/, "")}/${modelPath}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  function modelPathFor(modelName: string): string {
+    return modelName.startsWith("models/") ? modelName : `models/${modelName}`;
+  }
+
+  function urlForModel(modelName: string): string {
+    return `${apiBase.replace(/\/$/, "")}/${modelPathFor(modelName)}:generateContent?key=${encodeURIComponent(gemmaApiKey)}`;
+  }
+
+  const primaryUrl = urlForModel(model);
+  const fallbackUrl = fallbackModel && fallbackModel !== model ? urlForModel(fallbackModel) : undefined;
   const responseSchema = {
     type: "object",
     properties: {
@@ -1261,10 +1309,15 @@ async function requestGemmaGradeSuggestions(
 
   async function postGemma(
     prompt: string,
-    includeSchema: boolean
+    includeSchema: boolean,
+    url: string,
+    useJsonMode: boolean
   ): Promise<{ ok: true; data: unknown; rawText: string } | { ok: false; status: number; text: string }> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
     const response = await fetch(url, {
       method: "POST",
+      signal: controller.signal,
       headers: {
         "Content-Type": "application/json"
       },
@@ -1277,11 +1330,15 @@ async function requestGemmaGradeSuggestions(
         ],
         generationConfig: {
           temperature: 0,
-          responseMimeType: "application/json",
-          ...(includeSchema ? { responseJsonSchema: responseSchema } : {})
+          ...(useJsonMode
+            ? {
+              responseMimeType: "application/json",
+              ...(includeSchema ? { responseJsonSchema: responseSchema } : {})
+            }
+            : {})
         }
       })
-    });
+    }).finally(() => clearTimeout(timer));
 
     const text = await response.text();
     if (!response.ok) {
@@ -1295,71 +1352,157 @@ async function requestGemmaGradeSuggestions(
     }
   }
 
+  function retryDelayFromGemmaError(result: { status: number; text: string }, fallbackDelayMs: number): number {
+    if (result.status !== 429) {
+      return fallbackDelayMs;
+    }
+
+    try {
+      const parsed = JSON.parse(result.text) as {
+        error?: {
+          details?: Array<{
+            "@type"?: string;
+            retryDelay?: string;
+          }>;
+        };
+      };
+      const retryDelay = parsed.error?.details?.find((detail) => typeof detail.retryDelay === "string")?.retryDelay;
+      const retrySeconds = Number(retryDelay?.replace(/s$/, ""));
+      if (Number.isFinite(retrySeconds) && retrySeconds > 0) {
+        return Math.min(30000, Math.ceil(retrySeconds * 1000) + 500);
+      }
+    } catch {
+      // Fall back to parsing the human-readable message below.
+    }
+
+    const match = result.text.match(/retry in ([\d.]+)s/i);
+    const retrySeconds = Number(match?.[1]);
+    if (Number.isFinite(retrySeconds) && retrySeconds > 0) {
+      return Math.min(30000, Math.ceil(retrySeconds * 1000) + 500);
+    }
+
+    return Math.max(fallbackDelayMs, 5000);
+  }
+
   async function postGemmaWithRetryForPrompt(
     prompt: string,
-    includeSchema: boolean
+    includeSchema: boolean,
+    url: string,
+    useJsonMode: boolean
   ): Promise<{ ok: true; data: unknown; rawText: string } | { ok: false; status: number; text: string }> {
     const delays = [700, 1600];
 
     for (let attempt = 0; attempt <= delays.length; attempt += 1) {
-      const result = await postGemma(prompt, includeSchema);
-      if (result.ok || ![429, 500, 502, 503, 504].includes(result.status) || attempt === delays.length) {
+      const result = await postGemma(prompt, includeSchema, url, useJsonMode).catch((error) => ({
+        ok: false as const,
+        status: 0,
+        text: error instanceof Error ? error.message : "Gemma request failed before a response was received."
+      }));
+      if (result.ok || ![0, 429, 500, 502, 503, 504].includes(result.status) || attempt === delays.length) {
         return result;
       }
 
-      await wait(delays[attempt]);
+      await wait(retryDelayFromGemmaError(result, delays[attempt]));
     }
 
-    return postGemma(prompt, includeSchema);
+    return postGemma(prompt, includeSchema, url, useJsonMode);
   }
 
-  const allSuggestions: GradeSuggestion[] = [];
-  const debugBatches: GemmaDebugBatch[] = [];
-  for (const [batchIndex, batchTeams] of teamBatches.entries()) {
-    const validTeamIds = new Set(batchTeams.map((team) => team.teamId));
-    const prompt = buildPrompt(batchTeams, batchIndex, teamBatches.length);
-
-    let result = await postGemmaWithRetryForPrompt(prompt, true);
+  async function postGemmaWithSchemaFallback(
+    prompt: string,
+    url: string
+  ): Promise<{ ok: true; data: unknown; rawText: string } | { ok: false; status: number; text: string }> {
+    let result = await postGemmaWithRetryForPrompt(prompt, true, url, true);
     if (
       !result.ok &&
       result.status === 400 &&
       /schema|responseJsonSchema|unsupported|unknown field|invalid/i.test(result.text)
     ) {
-      result = await postGemmaWithRetryForPrompt(prompt, false);
+      result = await postGemmaWithRetryForPrompt(prompt, false, url, true);
+    }
+
+    if (
+      !result.ok &&
+      result.status === 400 &&
+      /json mode|responseMimeType|mime/i.test(result.text)
+    ) {
+      return postGemmaWithRetryForPrompt(prompt, false, url, false);
+    }
+
+    return result;
+  }
+
+  async function requestBatch(
+    batchTeams: typeof teams,
+    batchIndex: number
+  ): Promise<
+    | { ok: true; suggestions: GradeSuggestion[]; debugBatch?: GemmaDebugBatch }
+    | { ok: false; message: string }
+  > {
+    const validTeamIds = new Set(batchTeams.map((team) => team.teamId));
+    const prompt = buildPrompt(batchTeams, batchIndex, teamBatches.length);
+
+    let result = await postGemmaWithSchemaFallback(prompt, primaryUrl);
+    let resultModel = model;
+    if (!result.ok && result.status === 429 && fallbackUrl) {
+      console.warn(
+        `Gemma primary model ${model} hit rate limit for batch ${batchIndex + 1}/${teamBatches.length}; retrying with ${fallbackModel}.`
+      );
+      result = await postGemmaWithSchemaFallback(prompt, fallbackUrl);
+      resultModel = fallbackModel;
     }
 
     if (!result.ok) {
-      throw new Error(
-        `Gemma request failed for batch ${batchIndex + 1}/${teamBatches.length} (${result.status}).\n\nFull Gemma response:\n${result.text}`
-      );
+      return {
+        ok: false,
+        message: `Gemma request failed for batch ${batchIndex + 1}/${teamBatches.length} using ${resultModel} (${result.status}).\n\nFull Gemma response:\n${result.text}`
+      };
     }
 
     const text = extractGemmaText(result.data);
     if (!text) {
-      throw new Error(
-        `Gemma response did not contain text for batch ${batchIndex + 1}/${teamBatches.length}.\n\nFull Gemma response:\n${stringifyForDebug(result.data)}`
-      );
+      return {
+        ok: false,
+        message: `Gemma response did not contain text for batch ${batchIndex + 1}/${teamBatches.length}.\n\nFull Gemma response:\n${stringifyForDebug(result.data)}`
+      };
     }
 
     try {
       const parsedSuggestions = parseGemmaSuggestions(text, validTeamIds, parts);
-      allSuggestions.push(...parsedSuggestions);
-      if (includeDebug) {
-        debugBatches.push({
+      return {
+        ok: true,
+        suggestions: parsedSuggestions,
+        debugBatch: includeDebug
+          ? {
           batchIndex: batchIndex + 1,
           batchCount: teamBatches.length,
           teamIds: batchTeams.map((team) => team.teamId),
           prompt,
           modelText: text,
           rawResponse: result.rawText
-        });
-      }
+          }
+          : undefined
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not parse Gemma suggestions.";
-      throw new Error(
-        `${message}\n\nGemma batch ${batchIndex + 1}/${teamBatches.length}\n\nFull Gemma model text:\n${text}\n\nFull Gemma response:\n${stringifyForDebug(result.data)}`
-      );
+      return {
+        ok: false,
+        message: `${message}\n\nGemma batch ${batchIndex + 1}/${teamBatches.length}\n\nFull Gemma model text:\n${text}\n\nFull Gemma response:\n${stringifyForDebug(result.data)}`
+      };
     }
+  }
+
+  const batchResults = await mapWithConcurrency(teamBatches, batchConcurrency, requestBatch);
+  const allSuggestions = batchResults.flatMap((result) => result.ok ? result.suggestions : []);
+  const debugBatches = batchResults.flatMap((result) => result.ok && result.debugBatch ? [result.debugBatch] : []);
+  const failedBatches = batchResults.flatMap((result) => result.ok ? [] : [result.message]);
+
+  if (failedBatches.length > 0) {
+    console.warn(failedBatches.join("\n\n"));
+  }
+
+  if (allSuggestions.length === 0 && failedBatches.length > 0) {
+    throw new Error(failedBatches.join("\n\n"));
   }
 
   return {
