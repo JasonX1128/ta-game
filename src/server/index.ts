@@ -1997,6 +1997,26 @@ io.on("connection", (socket) => {
     broadcastState(room);
   });
 
+  socket.on("round:addMinute", (payload: { code?: unknown; hostToken?: unknown }, ack?: AckCallback) => {
+    const room = requireHost(socket, ack, payload);
+    if (!room) {
+      return;
+    }
+
+    if (room.phase !== "answering") {
+      fail(socket, ack, "The answer timer is not running.");
+      return;
+    }
+
+    const nextEndsAt = Math.max(room.roundEndsAt ?? Date.now(), Date.now()) + 60_000;
+    room.roundDurationSeconds = (room.roundDurationSeconds ?? 0) + 60;
+    room.roundEndsAt = nextEndsAt;
+    startRoundTimer(room);
+    touch(room);
+    ok(ack, {});
+    broadcastState(room);
+  });
+
   socket.on(
     "answer:draft",
     (payload: { code?: unknown; teamToken?: unknown; answer?: unknown }, ack?: AckCallback) => {

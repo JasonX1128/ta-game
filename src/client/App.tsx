@@ -1544,11 +1544,14 @@ function HostAnswering({
 }) {
   const [status, setStatus] = useState("");
 
+  async function addMinute(): Promise<void> {
+    const response = await request("round:addMinute", hostPayload);
+    setStatus(response.ok ? "" : response.message);
+  }
+
   async function stopTimer(): Promise<void> {
     const response = await request("round:stopAnswering", hostPayload);
-    if (!response.ok) {
-      setStatus(response.message);
-    }
+    setStatus(response.ok ? "" : response.message);
   }
 
   return (
@@ -1556,10 +1559,16 @@ function HostAnswering({
       <QuestionCard question={currentQuestion(room)} round={room.currentRound} />
       <div className="round-toolbar">
         <TimerDisplay endsAt={room.roundEndsAt} />
-        <button className="secondary" onClick={stopTimer}>
-          <Timer size={18} />
-          Stop Timer
-        </button>
+        <div className="timer-toolbar-actions">
+          <button className="secondary" onClick={addMinute}>
+            <Plus size={18} />
+            Add 1 Minute
+          </button>
+          <button className="secondary" onClick={stopTimer}>
+            <Timer size={18} />
+            Stop Timer
+          </button>
+        </div>
       </div>
       <AnswerTable teams={room.teams} />
       {status ? <div className="status-line">{status}</div> : null}

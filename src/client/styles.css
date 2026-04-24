@@ -383,6 +383,14 @@ button:disabled {
   gap: 14px;
 }
 
+.timer-toolbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .action-row {
   margin-top: 16px;
 }
