@@ -55,6 +55,7 @@ type RoomRecord = {
   hostSocketIds: Set<string>;
   phase: PublicRoomState["phase"];
   settings: GameSettings;
+  baseQuestions: Question[];
   teams: TeamRecord[];
   currentRound: number;
   roundDurationSeconds?: number;
@@ -90,15 +91,19 @@ const rooms = new Map<string, RoomRecord>();
 const connections = new Map<string, SocketContext>();
 const DRAFT_GRACE_MS = 500;
 
+function cloneQuestions(questions: Question[]): Question[] {
+  return questions.map((question) => ({
+    ...question,
+    parts: question.parts?.map((part) => ({ ...part }))
+  }));
+}
+
 function cloneSettings(settings: GameSettings = DEFAULT_SETTINGS): GameSettings {
   return {
     questionCount: settings.questionCount,
     pointsPerCorrect: settings.pointsPerCorrect,
     bonusByRank: [...settings.bonusByRank],
-    questions: settings.questions.map((question) => ({
-      ...question,
-      parts: question.parts?.map((part) => ({ ...part }))
-    })),
+    questions: cloneQuestions(settings.questions),
     scrambleQuestionOrder: settings.scrambleQuestionOrder,
     answerRevealMode: settings.answerRevealMode,
     hideLeaderboardDuringAnswering: settings.hideLeaderboardDuringAnswering,
@@ -1205,12 +1210,9 @@ function lowestAvailableWager(room: RoomRecord, team: TeamRecord): number | unde
 }
 
 function shuffledQuestions(questions: Question[]): Question[] {
-  const next = questions.map((question) => ({
-    ...question,
-    parts: question.parts?.map((part) => ({ ...part }))
-  }));
+  const next = cloneQuestions(questions);
   for (let index = next.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
+    const swapIndex = crypto.randomInt(index + 1);
     [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
   }
 
@@ -1299,6 +1301,10 @@ function resetGame(room: RoomRecord): void {
   room.currentRound = 0;
   room.roundDurationSeconds = undefined;
   room.roundEndsAt = undefined;
+  room.settings = {
+    ...room.settings,
+    questions: cloneQuestions(room.baseQuestions)
+  };
 
   for (const team of room.teams) {
     team.usedWagers.clear();
@@ -1328,6 +1334,7 @@ io.on("connection", (socket) => {
       hostSocketIds: new Set(),
       phase: "lobby",
       settings: cloneSettings(),
+      baseQuestions: cloneQuestions(DEFAULT_SETTINGS.questions),
       teams: [],
       currentRound: 0,
       history: [],
@@ -1455,7 +1462,11 @@ io.on("connection", (socket) => {
         return;
       }
 
-      room.settings = validated;
+      room.baseQuestions = cloneQuestions(validated.questions);
+      room.settings = {
+        ...validated,
+        questions: cloneQuestions(validated.questions)
+      };
       touch(room);
       ok(ack, {});
       broadcastState(room);
@@ -1526,12 +1537,13 @@ io.on("connection", (socket) => {
     room.history = [];
     room.adjustments = [];
     room.gradeSuggestionCache = undefined;
-    if (room.settings.scrambleQuestionOrder && room.settings.questions.length > 1) {
-      room.settings = {
-        ...room.settings,
-        questions: shuffledQuestions(room.settings.questions)
-      };
-    }
+    room.settings = {
+      ...room.settings,
+      questions:
+        room.settings.scrambleQuestionOrder && room.baseQuestions.length > 1
+          ? shuffledQuestions(room.baseQuestions)
+          : cloneQuestions(room.baseQuestions)
+    };
     room.currentRound = 1;
     room.phase = "round_setup";
     room.roundDurationSeconds = undefined;
